@@ -44,4 +44,10 @@ class Dorm(cvb.FlexDict):
             if len(set(self['f'][self['b'] == i])) != 1:
                 raise RuntimeError("Two agents in assigned to the same Dorm bathroom are assigned to different floors.")
 
+        if len(self['r']) != len(self['b']) or len(self['r']) != len(self['b']):
+            raise RuntimeError("Dorm object has values of inconsistent length across keys.")
+
         return
+
+    def __len__(self):
+        return len(self['r'])
