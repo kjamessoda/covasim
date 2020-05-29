@@ -7,7 +7,7 @@ import covasim as cv
 
 # Run options
 do_plot = 1
-verbose = 1
+verbose = 0
 interv  = 1
 
 # Configure the sim -- can also just use a normal dictionary

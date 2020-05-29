@@ -295,7 +295,7 @@ def itrue(arr, inds):
     return inds[arr]
 
 def ifalse(arr, inds):
-    ''' Returns the indices that are true in the array -- name is short for indices[false] '''
+    ''' Returns the indices that are false in the array -- name is short for indices[false] '''
     return inds[~arr]
 
 def idefined(arr, inds):
