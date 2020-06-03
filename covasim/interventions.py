@@ -10,6 +10,7 @@ import sciris as sc
 import inspect
 import datetime as dt
 from . import utils as cvu
+from . import defaults as cvd
 from . import base as cvb
 
 
@@ -121,7 +122,10 @@ class Intervention:
         _,_,_,values = inspect.getargvalues(parent) # Get the values of the arguments
         self.input_args = {}
         for key,value in values.items():
-            if key not in ['self', '__class__']: # Skip these two
+            if key == 'kwargs': # Store additional kwargs directly
+                for k2,v2 in value.items():
+                    self.input_args[k2] = v2 # These are already a dict
+            elif key not in ['self', '__class__']: # Everything else, but skip these
                 self.input_args[key] = value
         return
 
@@ -305,11 +309,10 @@ def process_days(sim, days):
     '''
     if sc.isstring(days) or not sc.isiterable(days):
         days = sc.promotetolist(days)
-    if isinstance(days, list):
-        for d,day in enumerate(days):
-            if day in ['end', -1]:
-                day = sim['end_day']
-            days[d] = sim.day(day) # Ensure it's an integer and not a string or something
+    for d,day in enumerate(days):
+        if day in ['end', -1]:
+            day = sim['end_day']
+        days[d] = sim.day(day) # Ensure it's an integer and not a string or something
     days = sc.promotetoarray(days)
     return days
 
@@ -521,6 +524,26 @@ def get_subtargets(subtarget, sim):
     return subtarget_inds, subtarget_vals
 
 
+def get_quar_inds(quar_policy, sim):
+    '''
+    Helper function to return the appropriate indices for people in quarantine
+    based on the current quarantine testing "policy". Used by test_num and test_prob.
+
+    Args:
+        quar_policy (str): 'start', people entering quarantine; 'end', people leaving; 'both', entering and leaving; 'daily', every day in quarantine
+        sim (Sim): the simulation object
+    '''
+    t = sim.t
+    if   quar_policy == 'start': quar_inds = cvu.true(sim.people.date_quarantined==t-1) # Actually do the day before
+    elif quar_policy == 'end':   quar_inds = cvu.true(sim.people.date_end_quarantine==t)
+    elif quar_policy == 'both':  quar_inds = np.concatenate([cvu.true(sim.people.date_quarantined==t-1), cvu.true(sim.people.date_end_quarantine==t)])
+    elif quar_policy == 'daily': quar_inds = cvu.true(sim.people.quarantined)
+    else:
+        errormsg = f'Quarantine policy "{quar_policy}" not recognized: must be start, end, both, or daily'
+        raise ValueError(errormsg)
+    return quar_inds
+
+
 class test_num(Intervention):
     '''
     Test a fixed number of people per day.
@@ -529,6 +552,7 @@ class test_num(Intervention):
         daily_tests (arr)   : number of tests per day, can be int, array, or dataframe/series; if integer, use that number every day
         symp_test   (float) : odds ratio of a symptomatic person testing
         quar_test   (float) : probability of a person in quarantine testing
+        quar_policy (str)   : policy for testing in quarantine: options are 'start', 'end', 'both' (start and end), 'daily'
         subtarget   (dict)  : subtarget intervention to people with particular indices                                                 ( format : {'ind' : array of indices, or function to return indices from the sim, 'vals' : value ( s) to apply}
         sensitivity (float) : test sensitivity
         ili_prev    (arr)   : Prevalence of influenza-like-illness symptoms in the population; can be float, array, or dataframe/series
@@ -546,14 +570,15 @@ class test_num(Intervention):
         interv = cv.test_num(daily_tests=[0.10*n_people]*npts, subtarget={'inds': lambda sim: sim.people.age>50, 'vals': 1.2}) # People over 50 are 20% more likely to test
     '''
 
-    def __init__(self, daily_tests, symp_test=100.0, quar_test=1.0, subtarget=None,
+    def __init__(self, daily_tests, symp_test=100.0, quar_test=1.0, quar_policy=None, subtarget=None,
                  ili_prev=None, sensitivity=1.0, loss_prob=0, test_delay=0,
                  start_day=0, end_day=None, swab_delay=None, **kwargs):
         super().__init__(**kwargs) # Initialize the Intervention object
         self._store_args() # Store the input arguments so the intervention can be recreated
         self.daily_tests = daily_tests # Should be a list of length matching time
         self.symp_test   = symp_test   # Set probability of testing symptomatics
-        self.quar_test   = quar_test
+        self.quar_test   = quar_test # Probability of testing people in quarantine
+        self.quar_policy = quar_policy if quar_policy else 'start'
         self.subtarget   = subtarget  # Set any other testing criteria
         self.ili_prev    = ili_prev     # Should be a list of length matching time or a float or a dataframe
         self.sensitivity = sensitivity
@@ -607,13 +632,13 @@ class test_num(Intervention):
         symp_inds = cvu.true(sim.people.symptomatic)
         symp_test = self.symp_test
         if self.pdf: # Handle the onset to swab delay
-            symp_time = int(t - sim.people.date_symptomatic[symp_inds]) # Find time since symptom onset
+            symp_time = cvd.default_int(t - sim.people.date_symptomatic[symp_inds]) # Find time since symptom onset
             inv_count = (np.bincount(symp_time)/len(symp_time)) # Find how many people have had symptoms of a set time and invert
-            count = np.nan * np.ones(inv_count.shape) #
-            count[inv_count != 0] = 1/inv_count[inv_count != 0]
-            symp_test *= self.pdf.pdf(symp_time) * count[symp_time] # Put it all together, have to add a small amount because 0.0 will fail
+            count = np.nan * np.ones(inv_count.shape) # Initialize the count
+            count[inv_count != 0] = 1/inv_count[inv_count != 0] # Update the counts where defined
+            symp_test *= self.pdf.pdf(symp_time) * count[symp_time] # Put it all together
 
-        test_probs[symp_inds] *= symp_test
+        test_probs[symp_inds] *= symp_test # Update the test probabilities
 
         # Handle symptomatic testing, taking into account prevalence of ILI symptoms
         if self.ili_prev is not None:
@@ -624,7 +649,7 @@ class test_num(Intervention):
                 test_probs[ili_inds] *= self.symp_test
 
         # Handle quarantine testing
-        quar_inds  = cvu.true(sim.people.quarantined)
+        quar_inds = get_quar_inds(self.quar_policy, sim)
         test_probs[quar_inds] *= self.quar_test
 
         # Handle any other user-specified testing criteria
@@ -653,6 +678,7 @@ class test_prob(Intervention):
         asymp_prob (float): Probability of testing an asymptomatic (unquarantined) person
         symp_quar_prob (float): Probability of testing a symptomatic quarantined person
         asymp_quar_prob (float): Probability of testing an asymptomatic quarantined person
+        quar_policy (str): Policy for testing in quarantine: options are 'start', 'end', 'both' (start and end), 'daily'
         subtarget (dict): subtarget intervention to people with particular indices (see test_num() for details)
         test_sensitivity (float): Probability of a true positive
         ili_prev (float or array): Prevalence of influenza-like-illness symptoms in the population
@@ -666,14 +692,15 @@ class test_prob(Intervention):
         interv = cv.test_prob(symp_prob=0.1, asymp_prob=0.01) # Test 10% of symptomatics and 1% of asymptomatics
         interv = cv.test_prob(symp_quar_prob=0.4) # Test 40% of those in quarantine with symptoms
     '''
-    def __init__(self, symp_prob, asymp_prob=0.0, symp_quar_prob=None, asymp_quar_prob=None, subtarget=None, ili_prev=None,
-                 test_sensitivity=1.0, loss_prob=0.0, test_delay=0, start_day=0, end_day=None, **kwargs):
+    def __init__(self, symp_prob, asymp_prob=0.0, symp_quar_prob=None, asymp_quar_prob=None, quar_policy=None, subtarget=None, ili_prev=None,
+                 test_sensitivity=1.0, loss_prob=0.0, test_delay=0, start_day=0, end_day=None, swab_delay=None, **kwargs):
         super().__init__(**kwargs) # Initialize the Intervention object
         self._store_args() # Store the input arguments so the intervention can be recreated
         self.symp_prob        = symp_prob
         self.asymp_prob       = asymp_prob
         self.symp_quar_prob   = symp_quar_prob  if  symp_quar_prob is not None else  symp_prob
         self.asymp_quar_prob  = asymp_quar_prob if asymp_quar_prob is not None else asymp_prob
+        self.quar_policy      = quar_policy if quar_policy else 'start'
         self.subtarget        = subtarget
         self.ili_prev         = ili_prev
         self.test_sensitivity = test_sensitivity
@@ -681,6 +708,7 @@ class test_prob(Intervention):
         self.test_delay       = test_delay
         self.start_day        = start_day
         self.end_day          = end_day
+        self.pdf              = cvu.get_pdf(**sc.mergedicts(swab_delay)) # If provided, get the distribution's pdf -- this returns an empty dict if None is supplied
         return
 
 
@@ -690,9 +718,7 @@ class test_prob(Intervention):
         self.end_day   = sim.day(self.end_day)
         self.days      = [self.start_day, self.end_day]
         self.ili_prev  = process_daily_data(self.ili_prev, sim, self.start_day)
-
         self.initialized = True
-
         return
 
 
@@ -704,29 +730,44 @@ class test_prob(Intervention):
         elif self.end_day is not None and t > self.end_day:
             return
 
-        # Define symptomatics, accounting for ILI prevalence
+        # Find probablity for symptomatics to be tested
         symp_inds  = cvu.true(sim.people.symptomatic)
+        symp_prob = self.symp_prob
+        if self.pdf:
+            symp_time = cvd.default_int(t - sim.people.date_symptomatic[symp_inds]) # Find time since symptom onset
+            inv_count = (np.bincount(symp_time)/len(symp_time)) # Find how many people have had symptoms of a set time and invert
+            count = np.nan * np.ones(inv_count.shape)
+            count[inv_count != 0] = 1/inv_count[inv_count != 0]
+            symp_prob = np.ones(len(symp_time))
+            inds = 1 > (symp_time*self.symp_prob)
+            symp_prob[inds] = self.symp_prob/(1-symp_time[inds]*self.symp_prob)
+            symp_prob = self.pdf.pdf(symp_time) * symp_prob * count[symp_time]
+
+        # Define symptomatics, accounting for ILI prevalence
+        pop_size = sim['pop_size']
+        ili_inds = []
         if self.ili_prev is not None:
             rel_t = t - self.start_day
             if rel_t < len(self.ili_prev):
-                n_ili = int(self.ili_prev[rel_t] * sim['pop_size'])  # Number with ILI symptoms on this day
-                ili_inds = cvu.choose(sim['pop_size'], n_ili) # Give some people some symptoms, assuming that this is independent of COVID symptomaticity...
-                symp_inds = np.unique(np.concatenate((symp_inds, ili_inds)),0)
+                n_ili = int(self.ili_prev[rel_t] * pop_size)  # Number with ILI symptoms on this day
+                ili_inds = cvu.choose(pop_size, n_ili) # Give some people some symptoms, assuming that this is independent of COVID symptomaticity...
+                ili_inds = np.setdiff1d(ili_inds, symp_inds)
 
         # Define asymptomatics: those who neither have COVID symptoms nor ILI symptoms
-        asymp_inds = np.setdiff1d(np.arange(sim['pop_size']), symp_inds)
+        asymp_inds = np.setdiff1d(np.setdiff1d(np.arange(pop_size), symp_inds), ili_inds)
 
         # Handle quarantine and other testing criteria
-        quar_inds       = cvu.true(sim.people.quarantined)
+        quar_inds = get_quar_inds(self.quar_policy, sim)
         symp_quar_inds  = np.intersect1d(quar_inds, symp_inds)
         asymp_quar_inds = np.intersect1d(quar_inds, asymp_inds)
+        diag_inds       = cvu.true(sim.people.diagnosed)
         if self.subtarget is not None:
             subtarget_inds  = self.subtarget['inds']
-        diag_inds       = cvu.true(sim.people.diagnosed)
 
         # Construct the testing probabilities piece by piece -- complicated, since need to do it in the right order
         test_probs = np.zeros(sim.n) # Begin by assigning equal testing probability to everyone
-        test_probs[symp_inds]       = self.symp_prob       # People with symptoms
+        test_probs[symp_inds]       = symp_prob            # People with symptoms
+        test_probs[ili_inds]        = self.symp_prob       # People with symptoms
         test_probs[asymp_inds]      = self.asymp_prob      # People without symptoms
         test_probs[symp_quar_inds]  = self.symp_quar_prob  # People with symptoms in quarantine
         test_probs[asymp_quar_inds] = self.asymp_quar_prob # People without symptoms in quarantine
@@ -734,9 +775,9 @@ class test_prob(Intervention):
             subtarget_inds, subtarget_vals = get_subtargets(self.subtarget, sim)
             test_probs[subtarget_inds] = subtarget_vals # People being explicitly subtargeted
         test_probs[diag_inds] = 0.0 # People who are diagnosed don't test
-        test_inds = cvu.binomial_arr(test_probs).nonzero()[0] # Finally, calculate who actually tests
+        test_inds = cvu.true(cvu.binomial_arr(test_probs)) # Finally, calculate who actually tests
 
-        sim.people.test(test_inds, test_sensitivity=self.test_sensitivity, loss_prob=self.loss_prob, test_delay=self.test_delay)
+        sim.people.test(test_inds, test_sensitivity=self.test_sensitivity, loss_prob=self.loss_prob, test_delay=self.test_delay) # Actually test people
         sim.results['new_tests'][t] += int(len(test_inds)*sim['pop_scale']/sim.rescale_vec[t]) # If we're using dynamic scaling, we have to scale by pop_scale, not rescale_vec
 
         return

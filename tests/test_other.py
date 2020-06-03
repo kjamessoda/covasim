@@ -75,7 +75,7 @@ def test_base():
     ppl.state_keys()
     ppl.date_keys()
     ppl.dur_keys()
-    ppl.index()
+    ppl.indices()
     ppl._resize_arrays(pop_size=200) # This only resizes the arrays, not actually create new people
     ppl._resize_arrays(pop_size=100) # Change back
     ppl.to_df()
@@ -98,7 +98,7 @@ def test_base():
     transtree = sim.make_transtree()
     transtree.plot()
     transtree.animate(animate=False)
-    transtree.plot_histogram()
+    transtree.plot_histograms()
 
     # Tidy up
     remove_files(json_path, sim_path)

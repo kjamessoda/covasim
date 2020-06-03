@@ -77,7 +77,7 @@ class Result(object):
         name (str): name of this result, e.g. new_infections
         npts (int): if values is None, precreate it to be of this length
         scale (str): whether or not the value scales by population size; options are "dynamic", "static", or False
-        color (str or array): default color for plotting (hex or RGB notation)
+        color (str/arr): default color for plotting (hex or RGB notation)
 
     **Example**::
 
@@ -111,10 +111,16 @@ class Result(object):
         return output
 
     def __getitem__(self, *args, **kwargs):
+        ''' To allow e.g. result[5] instead of result.values[5] '''
         return self.values.__getitem__(*args, **kwargs)
 
     def __setitem__(self, *args, **kwargs):
+        ''' To allow e.g. result[:] = 1 instead of result.values[:] = 1 '''
         return self.values.__setitem__(*args, **kwargs)
+
+    def __len__(self):
+        ''' To allow len(result) instead of len(result.values) '''
+        return len(self.values)
 
     @property
     def npts(self):
@@ -463,7 +469,7 @@ class BaseSim(ParsObj):
         Args:
 
             filename (str or None): the name or path of the file to save to; if None, uses stored
-            kwargs: passed to makefilepath()
+            kwargs: passed to sc.makefilepath()
 
         Returns:
             filename (str): the validated absolute path to the saved file
@@ -491,7 +497,7 @@ class BaseSim(ParsObj):
             obj = self.shrink(skip_attrs=skip_attrs, in_place=False)
         else:
             obj = self
-        sc.saveobj(filename=filename, obj=obj)
+        cvm.save(filename=filename, obj=obj)
 
         return filename
 
@@ -502,8 +508,8 @@ class BaseSim(ParsObj):
         Load from disk from a gzipped pickle.
 
         Args:
-            filename (str): the name or path of the file to save to
-            kwargs: passed to sc.loadobj()
+            filename (str): the name or path of the file to load from
+            kwargs: passed to cv.load()
 
         Returns:
             sim (Sim): the loaded simulation object
@@ -535,9 +541,9 @@ class BasePeople(sc.prettyobj):
 
         # Handle pars and population size
         pars = sc.mergedicts({'pop_size':0, 'n_days':0}, pars)
-        self.pars = pars
-        self.pop_size = pars['pop_size']
-        self.n_days = pars['n_days']
+        self.pars     = pars # Equivalent to self.set_pars(pars)
+        self.pop_size = int(pars['pop_size'])
+        self.n_days   = int(pars['n_days'])
 
         # Other initialization
         self.t = 0 # Keep current simulation time
@@ -674,6 +680,15 @@ class BasePeople(sc.prettyobj):
         return (self[key]==0).sum()
 
 
+    def set_pars(self, pars):
+        '''
+        Very simple method to re-link the parameters stored in the people object
+        to the sim containing it: included simply for the sake of being explicit.
+        '''
+        self.pars = pars
+        return
+
+
     def keys(self):
         ''' Returns keys for all properties of the people object '''
         return self.meta.all_states[:]
@@ -700,16 +715,19 @@ class BasePeople(sc.prettyobj):
 
 
     def layer_keys(self):
-        ''' Get the available contact keys -- set by beta_layer rather than contacts since only the former is required '''
+        ''' Get the available contact keys -- try contacts first, then beta_layer '''
         try:
-            keys = list(self.pars['beta_layer'].keys())
-        except: # If not initialized
-            keys = []
+            keys = list(self.contacts.keys())
+        except: # If not fully initialized
+            try:
+                keys = list(self.pars['beta_layer'].keys())
+            except: # If not even partially initialized
+                keys = []
         return keys
 
 
-    def index(self):
-        ''' The indices of the array '''
+    def indices(self):
+        ''' The indices of each people array '''
         return np.arange(len(self))
 
 

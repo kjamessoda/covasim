@@ -2,16 +2,73 @@
 What's new
 ==========
 
-All notable changes to the codebase are documented in this file. As of version 1.3, changes that may result in differences in model output, or are required in order to run an old parameter set with the current version, are flagged with the term "Regression information".
+All notable changes to the codebase are documented in this file. Changes that may result in differences in model output, or are required in order to run an old parameter set with the current version, are flagged with the term "Regression information".
 
 .. contents:: **Contents**
    :local:
    :depth: 1
 
 
-~~~~~~~~~~~~~~~
-Latest versions
-~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
+Latest versions (1.4.x)
+~~~~~~~~~~~~~~~~~~~~~~~
+
+
+Version 1.4.7 (2020-06-02)
+--------------------------
+- Added ``quar_policy`` argument to ``cv.test_num()`` and ``cv.test_prob()``; by default, people are only tested upon entering quarantine (``'start'``); other options are to test people as they leave quarantine, both as they enter and leave, and every day they are in quarantine (which was the previous default behavior).
+- Requirements have been tidied up; ``python setup.py develop nowebapp`` now only installs minimal packages. In a future version, this may become the default.
+- Fixed intervention export and import from JSON.
+- *Regression information*: To restore previous behavior (not recommended) with using contact tracing, add ``quar_policy='daily'`` to ``cv.test_num()`` and ``cv.test_prob()`` interventions.
+- *GitHub info*: PR `593 <https://github.com/amath-idm/covasim/pull/593>`__, previous head ``89c58e1``
+
+
+Version 1.4.6 (2020-06-01)
+--------------------------
+- Implemented continuous rescaling: dynamic rescaling can now be used with an arbitrarily small ``rescale_factor``. The amount of rescaling on a given timestep is now either ``rescale_factor`` or the factor that would be required to bring the population below the threshold, whichever is larger.
+- *Regression information*: Results should not be affected unless a simulation was run with too small of a rescaling factor. This change corrects this issue.
+- *GitHub info*: PR `588 <https://github.com/amath-idm/covasim/pull/588>`__, previous head ``4cabddc``
+
+
+Version 1.4.5 (2020-05-31)
+--------------------------
+- Added ``cv.date_range()``.
+- Changed ``cv.day()`` and ``cv.date()`` to assume a start day of 2020-01-01 if not supplied.
+- Added the option to add custom data to a ``Fit`` object, e.g. age histogram data.
+
+
+Version 1.4.4 (2020-05-31)
+--------------------------
+- Improved transmission tree histogram plotting, including allowing start and end days, and renamed ``plot_histograms()``.
+- Added functions for negative binomial distributions, allowing easier exploration of overdispersion effects: see ``cv.make_random_contacts()``, and, most importantly, ``pars['beta_dist']``.
+- Renamed ``cv.multinomial()`` to ``cv.n_multinomial()``.
+- Added a ``build_docs`` script.
+
+
+Version 1.4.3 (2020-05-30)
+--------------------------
+- Added ``swab_delay`` to ``cv.test_prob()``, which behaves the same way as for ``cv.test_num()`` (to set the delay between experiencing symptoms and receiving a test).
+- Allowed weights for a ``Fit`` to be specified as a time series.
+
+
+Version 1.4.2 (2020-05-30)
+--------------------------
+- Renamed ``cv.check_save_info()`` to ``cv.check_save_version()``, and allowed the ``die`` argument to be passed.
+- Allowed ``verbose`` to be a float instead of an int; if between 0 and 1, during a model run, it will print out once every ``1/verbose`` days, e.g. ``verbose = 0.2`` will print an update once every 5 days.
+- Updated the default number of household contacts from 2.7 to 2.0 for ``hybrid``, and changed ``cv.poisson()`` to no longer cast to an integer. These two changes cancel out, so default behavior has not changed.
+- Updated the calculation of contacts from household sizes (now uses household size - 1, to remove self-connections).
+- Added ``cv.MultiSim.load()``.
+- Added Numba caching to ``compute_viral_load()``, reducing overall Covasim load time by roughly 50%.
+- Added an option for parallel execution of Numba functions (see ``utils.py``); although this significantly improves performance (20-30%), it results in non-deterministic results, so is disabled by default.
+- Changed ``People`` to use its own contact layer keys rather than those taken from the parameters.
+- Improved plotting and corrected minor bugs in age histogram and model fit analyzers.
+- *Regression information*:
+
+  - Replace ``cv.check_save_info()`` with ``cv.check_save_version()``.
+  - If you used a non-integer number of contacts, round down to the nearest integer (e.g., change 2.7 to 2.0).
+  - If you loaded a household size distribution (e.g. ``cv.Sim(location='nigeria')``), add one to the number of household contacts (but then round down).
+
+- *GitHub info*: PR `577 <https://github.com/amath-idm/covasim/pull/577>`__, previous head ``a828d29``
 
 
 Version 1.4.1 (2020-05-29)
@@ -65,7 +122,7 @@ Other changes
 - Moved ``sweeps`` (Weights & Biases) to ``examples/wandb``.
 - Refactored cruise ship example to work again.
 - Various bugfixes (e.g. to plotting arguments, data scrapers, etc.).
-- *Regression information*: To migrate an old parameter set ``pars`` to this version and to restore previoius behavior, use::
+- *Regression information*: To migrate an old parameter set ``pars`` to this version and to restore previous behavior, use::
 
     pars['analyzers'] = None # Add the new parameter key
     interv_func = pars.pop('interv_func', None) # Remove the deprecated key
@@ -342,7 +399,7 @@ Version 0.30.1 (2020-05-02)
 ---------------------------
 - Added ``end_day`` as a parameter, allowing an end date to be specified instead of a number of days.
 - ``Sim.run()`` now displays the date being simulated.
-- Added a ``par_args`` arugument to ``multi_run()``, allowing arguments (e.g. ``ncpus``) to be passed to ``sc.parallelize()``.
+- Added a ``par_args`` argument to ``multi_run()``, allowing arguments (e.g. ``ncpus``) to be passed to ``sc.parallelize()``.
 - Added a ``compare()`` method to multisims and stopped people from being saved by default.
 - Fixed bug whereby intervention were not getting initialized if they were added to a sim after it was initialized.
 

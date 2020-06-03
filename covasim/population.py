@@ -8,6 +8,7 @@ import sciris as sc
 from collections import defaultdict
 from . import requirements as cvreq
 from . import utils as cvu
+from . import misc as cvm
 from . import data as cvdata
 from . import defaults as cvd
 from . import parameters as cvpars
@@ -20,19 +21,22 @@ __all__ = ['make_people', 'make_randpop', 'make_random_contacts',
            'make_synthpop']
 
 
-def make_people(sim, save_pop=False, popfile=None, verbose=None, die=True, reset=False):
+def make_people(sim, save_pop=False, popfile=None, die=True, reset=False, verbose=None, **kwargs):
     '''
-    Make the actual people for the simulation.
+    Make the actual people for the simulation. Usually called via sim.initialize(),
+    not directly by the user.
 
     Args:
         sim (Sim): the simulation object
-        verbose (bool): level of detail to print
-        id_len (int): length of ID for each person (default: calculate required length based on the number of people)
+        save_pop (bool): whether to save the population to disk
+        popfile (bool): if so, the filename to save to
         die (bool): whether or not to fail if synthetic populations are requested but not available
         reset (bool): whether to force population creation even if self.popdict/self.people exists
+        verbose (bool): level of detail to print
+        kwargs (dict): passed to make_randpop() or make_synthpop()
 
     Returns:
-        None.
+        people (People): people
     '''
 
     # Set inputs and defaults
@@ -66,9 +70,9 @@ def make_people(sim, save_pop=False, popfile=None, verbose=None, die=True, reset
     else:
         # Create the population
         if pop_type in ['random', 'clustered', 'hybrid']:
-            popdict = make_randpop(sim, microstructure=pop_type)
+            popdict = make_randpop(sim, microstructure=pop_type, **kwargs)
         elif pop_type == 'synthpops':
-            popdict = make_synthpop(sim)
+            popdict = make_synthpop(sim, **kwargs)
         elif pop_type is None:
             errormsg = f'You have set pop_type=None. This is fine, but you must ensure sim.popdict exists before calling make_people().'
             raise ValueError(errormsg)
@@ -92,7 +96,7 @@ def make_people(sim, save_pop=False, popfile=None, verbose=None, die=True, reset
             raise FileNotFoundError(errormsg)
         else:
             filepath = sc.makefilepath(filename=popfile)
-            sc.saveobj(filepath, people)
+            cvm.save(filepath, people)
             if verbose:
                 print(f'Saved population of type "{pop_type}" with {pop_size:n} people to {filepath}')
 
@@ -139,7 +143,7 @@ def make_randpop(sim, use_age_data=True, use_household_data=True, sex_ratio=0.5,
             try:
                 household_size = cvdata.get_household_size(location)
                 if 'h' in sim['contacts']:
-                    sim['contacts']['h'] = household_size
+                    sim['contacts']['h'] = household_size - 1 # Subtract 1 because e.g. each person in a 3-person household has 2 contacts
                 else:
                     keystr = ', '.join(list(sim['contacts'].keys()))
                     print(f'Warning; not loading household size for "{location}" since no "h" key; keys are "{keystr}". Try "hybrid" population type?')
@@ -155,7 +159,7 @@ def make_randpop(sim, use_age_data=True, use_household_data=True, sex_ratio=0.5,
     age_data_range = age_data_max - age_data_min
     age_data_prob  = age_data[:,2]
     age_data_prob /= age_data_prob.sum() # Ensure it sums to 1
-    age_bins       = cvu.multinomial(np.array(age_data_prob, dtype=cvd.default_float), cvd.default_int(pop_size)) # Choose age bins
+    age_bins       = cvu.n_multinomial(age_data_prob, pop_size) # Choose age bins
     ages           = age_data_min[age_bins] + age_data_range[age_bins]*np.random.random(pop_size) # Uniformly distribute within this age bin
 
     # Store output
@@ -178,7 +182,7 @@ def make_randpop(sim, use_age_data=True, use_household_data=True, sex_ratio=0.5,
     return popdict
 
 
-def make_random_contacts(pop_size, contacts, overshoot=1.2):
+def make_random_contacts(pop_size, contacts, overshoot=1.2, dispersion=None):
     '''
     Make random static contacts.
 
@@ -186,6 +190,7 @@ def make_random_contacts(pop_size, contacts, overshoot=1.2):
         pop_size (int): number of agents to create contacts between (N)
         contacts (dict): a dictionary with one entry per layer describing the average number of contacts per person for that layer
         overshoot (float): to avoid needing to take multiple Poisson draws
+        dispersion (float): if not None, use a negative binomial distribution with this dispersion parameter instead of Poisson to make the contacts
 
     Returns:
         contacts_list (list): a list of length N, where each entry is a dictionary by layer, and each dictionary entry is the UIDs of the agent's contacts
@@ -204,8 +209,11 @@ def make_random_contacts(pop_size, contacts, overshoot=1.2):
     all_contacts    = cvu.choose_r(max_n=pop_size, n=n_all_contacts) # Choose people at random
     p_counts = {}
     for lkey in layer_keys:
-        p_counts[lkey] = np.array((cvu.n_poisson(contacts[lkey], pop_size)/2.0).round(), dtype=cvd.default_int)  # Draw the number of Poisson contacts for this person
-        # p_counts[lkey] = np.array((cvu.sample(dist='lognormal_int', par1=contacts[lkey], par2=100, size=pop_size)/2.0).round(), dtype=cvd.default_int)
+        if dispersion is None:
+            p_count = cvu.n_poisson(contacts[lkey], pop_size) # Draw the number of Poisson contacts for this person
+        else:
+            p_count = cvu.n_neg_binomial(rate=contacts[lkey], dispersion=dispersion, n=pop_size) # Or, from a negative binomial
+        p_counts[lkey] = np.array((p_count/2.0).round(), dtype=cvd.default_int)
 
     # Make contacts
     count = 0
@@ -221,7 +229,7 @@ def make_random_contacts(pop_size, contacts, overshoot=1.2):
 
 
 def make_microstructured_contacts(pop_size, contacts):
-    ''' Create microstructured contacts -- i.e. households, schools, etc. '''
+    ''' Create microstructured contacts -- i.e. for households '''
 
     # Preprocessing -- same as above
     pop_size = int(pop_size) # Number of people

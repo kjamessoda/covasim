@@ -176,7 +176,7 @@ class age_histogram(Analyzer):
 
         # Handle states
         if self.states is None:
-            self.states = ['exposed', 'tested', 'diagnosed', 'dead']
+            self.states = ['exposed', 'dead', 'tested', 'diagnosed']
         self.states = sc.promotetolist(self.states)
         for s,state in enumerate(self.states):
             self.states[s] = state.replace('date_', '') # Allow keys starting with date_ as input, but strip it off here
@@ -326,7 +326,7 @@ class Fit(sc.prettyobj):
         weights (dict): the relative weight to place on each result
         keys (list): the keys to use in the calculation
         method (str): the method to be used to calculate the goodness-of-fit
-        eps (float): to avoid divide-by-zero errors
+        custom (dict): a custom dictionary of additional data to fit; format is e.g. {'<label>':{'data':[1,2,3], 'sim':[1,2,4], 'weights':2.0}}
         compute (bool): whether to compute the mismatch immediately
         verbose (bool): detail to print
 
@@ -338,15 +338,13 @@ class Fit(sc.prettyobj):
         fit.plot()
     '''
 
-    def __init__(self, sim, weights=None, keys=None, method=None, eps=1e-12, compute=True, verbose=False):
+    def __init__(self, sim, weights=None, keys=None, method=None, custom=None, compute=True, verbose=False):
 
         # Handle inputs
         self.weights = weights
-        self.eps     = eps
+        self.custom  = sc.mergedicts(custom)
         self.verbose = verbose
-        if weights is None:
-            weights = dict(cum_deaths=10, cum_diagnoses=5)
-        self.weights = weights
+        self.weights = sc.mergedicts({'cum_deaths':10, 'cum_diagnoses':5}, weights)
         self.keys    = keys
 
         # Copy data
@@ -360,9 +358,9 @@ class Fit(sc.prettyobj):
             errormsg = 'Model fit cannot be calculated until results are run'
             raise RuntimeError(errormsg)
         self.sim_results = sc.objdict()
-        self.sim_results.t = sim.results['t']
-        for key in sim.result_keys():
+        for key in sim.result_keys() + ['t', 'date']:
             self.sim_results[key] = sim.results[key]
+        self.sim_npts = sim.npts # Number of time points in the sim
 
         # Copy other things
         self.sim_dates = sim.datevec.tolist()
@@ -439,13 +437,44 @@ class Fit(sc.prettyobj):
                 self.pair[key].sim[i]  = self.sim_results[key].values[sim_inds[i]]
                 self.pair[key].data[i] = self.data[key].values[data_inds[i]]
 
+        # Process custom inputs
+        self.custom_keys = list(self.custom.keys())
+        for key in self.custom.keys():
+
+            # Initialize and do error checking
+            custom = self.custom[key]
+            c_keys = list(custom.keys())
+            if 'sim' not in c_keys or 'data' not in c_keys:
+                errormsg = f'Custom input must have "sim" and "data" keys, not {c_keys}'
+                raise sc.KeyNotFoundError(errormsg)
+            c_data = custom['data']
+            c_sim  = custom['sim']
+            try:
+                assert len(c_data) == len(c_sim)
+            except:
+                errormsg = f'Custom data and sim must be arrays, and be of the same length: data = {c_data}, sim = {c_sim} could not be processed'
+                raise ValueError(errormsg)
+            if key in self.pair:
+                errormsg = f'You cannot use a custom key "{key}" that matches one of the existing keys: {self.pair.keys()}'
+                raise ValueError(errormsg)
+
+            # If all tests pass, simply copy the data
+            self.pair[key] = sc.objdict()
+            self.pair[key].sim  = c_sim
+            self.pair[key].data = c_data
+
+            # Process weight, if available
+            wt = custom.get('weight', 1.0) # Attempt to retrieve key 'weight', or use the default if not provided
+            wt = custom.get('weights', wt) # ...but also try "weights"
+            self.weights[key] = wt # Set the weight
+
         return
 
 
     def compute_diffs(self, absolute=False):
         ''' Find the differences between the sim and the data '''
-        for key in self.keys:
-            self.diffs[key] = self.pair[key].data - self.pair[key].sim
+        for key in self.pair.keys():
+            self.diffs[key] = self.pair[key].sim - self.pair[key].data
             if absolute:
                 self.diffs[key] = np.abs(self.diffs[key])
         return
@@ -453,7 +482,7 @@ class Fit(sc.prettyobj):
 
     def compute_gofs(self, **kwargs):
         ''' Compute the goodness-of-fit '''
-        for key in self.keys:
+        for key in self.pair.keys():
             actual    = sc.dcp(self.pair[key].data)
             predicted = sc.dcp(self.pair[key].sim)
             self.gofs[key] = cvm.compute_gof(actual, predicted, **kwargs)
@@ -462,9 +491,20 @@ class Fit(sc.prettyobj):
 
     def compute_losses(self):
         ''' Compute the weighted goodness-of-fit '''
-        for key in self.keys:
+        for key in self.gofs.keys():
             if key in self.weights:
                 weight = self.weights[key]
+                if sc.isiterable(weight): # It's an array
+                    len_wt = len(weight)
+                    len_sim = self.sim_npts
+                    len_match = len(self.gofs[key])
+                    if len_wt == len_match: # If the weight already is the right length, do nothing
+                        pass
+                    elif len_wt == len_sim: # Most typical case: it's the length of the simulation, must trim
+                        weight = weight[self.inds.sim[key]] # Trim to matching indices
+                    else:
+                        errormsg = f'Could not map weight array of length {len_wt} onto simulation of length {len_sim} or data-model matches of length {len_match}'
+                        raise ValueError(errormsg)
             else:
                 weight = 1.0
             self.losses[key] = self.gofs[key]*weight
@@ -473,7 +513,7 @@ class Fit(sc.prettyobj):
 
     def compute_mismatch(self, use_median=False):
         ''' Compute the final mismatch '''
-        for key in self.keys:
+        for key in self.losses.keys():
             if use_median:
                 self.mismatches[key] = np.median(self.losses[key])
             else:
@@ -503,66 +543,73 @@ class Fit(sc.prettyobj):
         pl.rcParams['font.size'] = font_size
 
         if keys is None:
-            keys = self.keys
+            keys = self.keys + self.custom_keys
         n_keys = len(keys)
 
         loss_ax = None
-        # bar_color = [0, 0, 0]
         colors = sc.gridcolors(n_keys)
+        n_rows = 4
 
         figs = [pl.figure(**fig_args)]
         pl.subplots_adjust(**axis_args)
-        n_rows = 4
         main_ax1 = pl.subplot(n_rows, 2, 1)
         main_ax2 = pl.subplot(n_rows, 2, 2)
-        bot = sc.objdict()
-        bot.a = np.zeros(self.losses[0].shape)
-        bot.b = np.zeros(self.losses[0].shape)
-        total = 0
+        bottom = sc.objdict() # Keep track of the bottoms for plotting cumulative
+        bottom.a = np.zeros(self.losses[0].shape)
+        bottom.b = np.zeros(self.losses[0].shape)
         for k,key in enumerate(keys):
-            dates = self.inds.sim[key] # self.date_matches[key]
+            if key in self.keys: # It's a time series, plot with days and dates
+                days      = self.inds.sim[key] # The "days" axis (or not, for custom keys)
+                daylabel  = 'Day'
+            else: #It's custom, we don't know what it is
+                days      = np.arange(len(self.losses[key])) # Just use indices
+                daylabel  = 'Index'
 
-            for i,ax in enumerate([main_ax1, main_ax2]):
+            # Cumulative totals can't mix daily and non-daily inputs, so skip custom keys
+            if key in self.keys:
+                for i,ax in enumerate([main_ax1, main_ax2]):
 
-                if i == 0:
-                    data = self.losses[key]
-                    total += self.losses[key].sum()
-                    title = f'Daily total mismatch'
-                else:
-                    data = np.cumsum(self.losses[key])
-                    title = f'Cumulative mismatch: {total:0.3f}'
+                    if i == 0:
+                        data = self.losses[key]
+                        ylabel = 'Daily mismatch'
+                        title = f'Daily total mismatch'
+                    else:
+                        data = np.cumsum(self.losses[key])
+                        ylabel = 'Cumulative mismatch'
+                        title = f'Cumulative mismatch: {self.mismatch:0.3f}'
 
-                ax.bar(dates, data, width=width, bottom=bot[i], color=colors[k], label=f'{key}')
+                    dates = self.sim_results['date'][days] # Show these with dates, rather than days, as a reference point
+                    ax.bar(dates, data, width=width, bottom=bottom[i], color=colors[k], label=f'{key}')
 
-                if i == 0:
-                    bot[i] += self.losses[key]
-                else:
-                    bot[i] += np.cumsum(self.losses[key])
+                    if i == 0:
+                        bottom[i] += self.losses[key]
+                    else:
+                        bottom[i] += np.cumsum(self.losses[key])
 
-                if k == n_keys-1:
-                    ax.set_ylabel('Time series')
-                    ax.set_xlabel('Day')
-                    ax.set_title(title)
-                    ax.legend()
+                    if k == len(self.keys)-1:
+                        ax.set_xlabel('Date')
+                        ax.set_ylabel(ylabel)
+                        ax.set_title(title)
+                        ax.legend()
 
             pl.subplot(n_rows, n_keys, k+1*n_keys+1)
-            pl.plot(dates, self.pair[key].data, c='k', label='Data', **plot_args)
-            pl.plot(dates, self.pair[key].sim, c=colors[k], label='Simulation', **plot_args)
+            pl.plot(days, self.pair[key].data, c='k', label='Data', **plot_args)
+            pl.plot(days, self.pair[key].sim, c=colors[k], label='Simulation', **plot_args)
             pl.title(key)
             if k == 0:
                 pl.ylabel('Time series (counts)')
                 pl.legend()
 
             pl.subplot(n_rows, n_keys, k+2*n_keys+1)
-            pl.bar(dates, self.diffs[key], width=width, color=colors[k], label='Difference')
+            pl.bar(days, self.diffs[key], width=width, color=colors[k], label='Difference')
             pl.axhline(0, c='k')
             if k == 0:
                 pl.ylabel('Differences (counts)')
                 pl.legend()
 
             loss_ax = pl.subplot(n_rows, n_keys, k+3*n_keys+1, sharey=loss_ax)
-            pl.bar(dates, self.losses[key], width=width, color=colors[k], label='Losses')
-            pl.xlabel('Day')
+            pl.bar(days, self.losses[key], width=width, color=colors[k], label='Losses')
+            pl.xlabel(daylabel)
             pl.title(f'Total loss: {self.losses[key].sum():0.3f}')
             if k == 0:
                 pl.ylabel('Losses')
@@ -591,9 +638,10 @@ class TransTree(sc.prettyobj):
 
         # Pull out the people and some of the sim results
         people = sim.people
-        self.sim_results = sc.objdict()
-        self.sim_results.t = sim.results['t']
-        self.sim_results.cum_infections = sim.results['cum_infections'].values
+        self.sim_start = sim['start_day'] # Used for filtering later
+        self.sim_results = {}
+        self.sim_results['t'] = sim.results['t']
+        self.sim_results['cum_infections'] = sim.results['cum_infections'].values
         self.n_days = people.t  # people.t should be set to the last simulation timestep in the output (since the Transtree is constructed after the people have been stepped forward in time)
         self.pop_size = len(people)
 
@@ -603,19 +651,21 @@ class TransTree(sc.prettyobj):
         # Parse into sources and targets
         self.sources = [None for i in range(self.pop_size)]
         self.targets = [[]   for i in range(self.pop_size)]
+        self.source_dates = [None for i in range(self.pop_size)]
+        self.target_dates = [[]   for i in range(self.pop_size)]
 
-        self.n_targets = np.nan+np.zeros(self.pop_size)
         for entry in self.infection_log:
             source = entry['source']
             target = entry['target']
+            date   = entry['date']
             if source:
                 self.sources[target] = source # Each target has at most one source
                 self.targets[source].append(target) # Each source can have multiple targets
-        for i in range(self.pop_size):
-            if self.sources[i] is not None:
-                self.n_targets[i] = len(self.targets[i])
-        self.infected_inds = sc.findinds(~np.isnan(self.n_targets))
-        self.n_targets = self.n_targets[self.infected_inds]
+                self.source_dates[target] = date # Each target has at most one source
+                self.target_dates[source].append(date) # Each source can have multiple targets
+
+        # Count the number of targets each person has
+        self.n_targets = self.count_targets()
 
         # Include the detailed transmission tree as well
         self.detailed = self.make_detailed(people)
@@ -666,19 +716,56 @@ class TransTree(sc.prettyobj):
         return output
 
 
+    def day(self, day=None, which=None):
+        ''' Convenience function for converting an input to an integer day '''
+        if day is not None:
+            day = cvm.day(day, start_day=self.sim_start)
+        elif which == 'start':
+            day = 0
+        elif which == 'end':
+            day = self.n_days
+        return day
+
+
+    def count_targets(self, start_day=None, end_day=None):
+        '''
+        Count the number of targets each infected person has. If start and/or end
+        days are given, it will only count the targets of people who got infected
+        between those dates (it does not, however, filter on the date the target
+        got infected).
+
+        Args:
+            start_day (int/str): the day on which to start counting people who got infected
+            end_day (int/str): the day on which to stop counting people who got infected
+        '''
+
+        # Handle start and end days
+        start_day = self.day(start_day, which='start')
+        end_day   = self.day(end_day,   which='end')
+
+        n_targets = np.nan+np.zeros(self.pop_size)
+        for i in range(self.pop_size):
+            if self.sources[i] is not None:
+                if self.source_dates[i] >= start_day and self.source_dates[i] <= end_day:
+                    n_targets[i] = len(self.targets[i])
+        n_target_inds = sc.findinds(~np.isnan(n_targets))
+        n_targets = n_targets[n_target_inds]
+        return n_targets
+
+
     def make_detailed(self, people, reset=False):
         ''' Construct a detailed transmission tree, with additional information for each person '''
-        # Reset to look like the line list, but with more detail
+
         detailed = [None]*self.pop_size
 
         for transdict in self.infection_log:
 
             # Pull out key quantities
-            ddict  = sc.objdict(sc.dcp(transdict)) # For "detailed dictionary"
-            source = ddict.source
-            target = ddict.target
-            ddict.s = sc.objdict() # Source
-            ddict.t = sc.objdict() # Target
+            ddict  = sc.dcp(transdict) # For "detailed dictionary"
+            source = ddict['source']
+            target = ddict['target']
+            ddict['s'] = {} # Source properties
+            ddict['t'] = {} # Target properties
 
             # If the source is available (e.g. not a seed infection), loop over both it and the target
             if source is not None:
@@ -695,11 +782,11 @@ class TransTree(sc.prettyobj):
                 for attr in attrs:
                     if attr.startswith('date_'):
                         is_attr = attr.replace('date_', 'is_') # Convert date to a boolean, e.g. date_diagnosed -> is_diagnosed
-                        ddict.s[is_attr] = ddict.s[attr] <= ddict['date'] # These don't make sense for people just infected (targets), only sources
+                        ddict['s'][is_attr] = ddict['s'][attr] <= ddict['date'] # These don't make sense for people just infected (targets), only sources
 
-                ddict.s.is_asymp   = np.isnan(people.date_symptomatic[source])
-                ddict.s.is_presymp = ~ddict.s.is_asymp and ~ddict.s.is_symptomatic # Not asymptomatic and not currently symptomatic
-            ddict.t['is_quarantined'] = ddict.t['date_quarantined'] <= ddict['date'] # This is the only target date that it makes sense to define since it can happen before infection
+                ddict['s']['is_asymp']   = np.isnan(people.date_symptomatic[source])
+                ddict['s']['is_presymp'] = ~ddict['s']['is_asymp'] and ~ddict['s']['is_symptomatic'] # Not asymptomatic and not currently symptomatic
+            ddict['t']['is_quarantined'] = ddict['t']['date_quarantined'] <= ddict['date'] # This is the only target date that it makes sense to define since it can happen before infection
 
             detailed[target] = ddict
 
@@ -719,10 +806,14 @@ class TransTree(sc.prettyobj):
         time to transmit.
         """
         n_infected = []
-        for i, node in self.graph.nodes.items():
-            if i is None or np.isnan(node['date_exposed']) or (recovered_only and node['date_recovered']>self.n_days):
-                continue
-            n_infected.append(self.graph.out_degree(i))
+        try:
+            for i, node in self.graph.nodes.items():
+                if i is None or np.isnan(node['date_exposed']) or (recovered_only and node['date_recovered']>self.n_days):
+                    continue
+                n_infected.append(self.graph.out_degree(i))
+        except Exception as E:
+            errormsg = f'Unable to compute r0 ({str(E)}): you may need to reinitialize the transmission tree with to_networkx=True'
+            raise RuntimeError(errormsg)
         return np.mean(n_infected)
 
 
@@ -734,8 +825,8 @@ class TransTree(sc.prettyobj):
         ttlist = []
         for source_ind, target_ind in self.transmissions:
             ddict = self.detailed[target_ind]
-            source = ddict.s
-            target = ddict.t
+            source = ddict['s']
+            target = ddict['t']
 
             tdict = {}
             tdict['date'] =  ddict['date']
@@ -835,9 +926,9 @@ class TransTree(sc.prettyobj):
             if ddict is None:
                 continue # Skip the 'None' node corresponding to seeded infections
 
-            frame = sc.objdict()
-            tdq = sc.objdict()  # Short for "tested, diagnosed, or quarantined"
-            target = ddict.t
+            frame = {}
+            tdq = {}  # Short for "tested, diagnosed, or quarantined"
+            target = ddict['t']
             target_ind = ddict['target']
 
             if not np.isnan(ddict['date']): # If this person was infected
@@ -852,16 +943,16 @@ class TransTree(sc.prettyobj):
                     source_date = 0
 
                 # Construct this frame
-                frame.x = [source_date, target_date]
-                frame.y = [source_ind, target_ind]
-                frame.c = colors[source_ind]
-                frame.i = True  # If this person is infected
+                frame['x'] = [source_date, target_date]
+                frame['y'] = [source_ind, target_ind]
+                frame['c'] = colors[source_ind]
+                frame['i'] = True  # If this person is infected
                 frames[int(target_date)].append(frame)
 
                 # Handle testing, diagnosis, and quarantine
-                tdq.t = target_ind
-                tdq.d = target_date
-                tdq.c = colors[int(target_ind)]
+                tdq['t'] = target_ind
+                tdq['d'] = target_date
+                tdq['c'] = colors[int(target_ind)]
                 date_t = target['date_tested']
                 date_d = target['date_diagnosed']
                 date_q = target['date_known_contact']
@@ -873,10 +964,10 @@ class TransTree(sc.prettyobj):
                     quars[int(date_q)].append(tdq)
 
             else:
-                frame.x = [0]
-                frame.y = [target_ind]
-                frame.c = sus_color
-                frame.i = False
+                frame['x'] = [0]
+                frame['y'] = [target_ind]
+                frame['c'] = sus_color
+                frame['i'] = False
                 frames[0].append(frame)
 
         # Configure plotting
@@ -909,15 +1000,21 @@ class TransTree(sc.prettyobj):
             tlist = tests[day]
             dlist = diags[day]
             qlist = quars[day]
+            t_d = tdq['d']
+            t_t = tdq['t']
+            t_c = tdq['c']
             for f in flist:
                 if verbose: print(f)
-                pl.plot(f.x[0], f.y[0], 'o', c=f.c, markersize=msize, **plot_args)  # Plot sources
-                pl.plot(f.x, f.y, '-', c=f.c, **plot_args)  # Plot transmission lines
-                if f.i:  # If this person is infected
-                    pl.plot(f.x[1], f.y[1], '*', c=f.c, markersize=msize, **plot_args)  # Plot targets
-            for tdq in tlist: pl.plot(tdq.d, tdq.t, 'o', c=tdq.c, markersize=msize * 2, fillstyle='none')  # Tested; No alpha for this
-            for tdq in dlist: pl.plot(tdq.d, tdq.t, 's', c=tdq.c, markersize=msize * 1.2, **plot_args)  # Diagnosed
-            for tdq in qlist: pl.plot(tdq.d, tdq.t, 'x', c=tdq.c, markersize=msize * 2.0)  # Quarantine; no alpha for this
+                x = f['x']
+                y = f['y']
+                c = f['c']
+                pl.plot(x[0], y[0], 'o', c=c, markersize=msize, **plot_args)  # Plot sources
+                pl.plot(x, y, '-', c=c, **plot_args)  # Plot transmission lines
+                if f['i']:  # If this person is infected
+                    pl.plot(x[1], y[1], '*', c=c, markersize=msize, **plot_args)  # Plot targets
+            for tdq in tlist: pl.plot(t_d, t_t, 'o', c=t_c, markersize=msize * 2, fillstyle='none')  # Tested; No alpha for this
+            for tdq in dlist: pl.plot(t_d, t_t, 's', c=t_c, markersize=msize * 1.2, **plot_args)  # Diagnosed
+            for tdq in qlist: pl.plot(t_d, t_t, 'x', c=t_c, markersize=msize * 2.0)  # Quarantine; no alpha for this
             pl.plot([0, day], [0.5, 0.5], c='k', lw=5)  # Plot the endless march of time
             if animate:  # Whether to animate
                 pl.pause(delay)
@@ -925,34 +1022,41 @@ class TransTree(sc.prettyobj):
         return fig
 
 
-    def plot_histogram(self, bins=None, width=0.8, fig_args=None, font_size=18):
+    def plot_histograms(self, start_day=None, end_day=None, bins=None, width=0.8, fig_args=None, font_size=18):
         '''
         Plots a histogram of the number of transmissions.
 
         Args:
+            start_day (int/str): the day on which to start counting people who got infected
+            end_day (int/str): the day on which to stop counting people who got infected
             bins (list): bin edges to use for the histogram
             width (float): width of bars
             fig_args (dict): passed to pl.figure()
             font_size (float): size of font
         '''
+
+        # Process targets
+        n_targets = self.count_targets(start_day, end_day)
+
+        # Handle bins
         if bins is None:
-            max_infections = self.n_targets.max()
+            max_infections = n_targets.max()
             bins = np.arange(0, max_infections+2)
 
         # Analysis
-        counts = np.histogram(self.n_targets, bins)[0]
+        counts = np.histogram(n_targets, bins)[0]
 
         bins = bins[:-1] # Remove last bin since it's an edge
         total_counts = counts*bins
         # counts = counts*100/counts.sum()
         # total_counts = total_counts*100/total_counts.sum()
         n_bins = len(bins)
-        n_trans = sum(total_counts)
-        index = np.linspace(0, 100, len(self.n_targets))
-        sorted_arr = np.sort(self.n_targets)
+        index = np.linspace(0, 100, len(n_targets))
+        sorted_arr = np.sort(n_targets)
         sorted_sum = np.cumsum(sorted_arr)
         sorted_sum = sorted_sum/sorted_sum.max()*100
         change_inds = sc.findinds(np.diff(sorted_arr) != 0)
+        max_labels = 15 # Maximum number of ticks and legend entries to plot
 
         # Plotting
         fig_args = sc.mergedicts(dict(figsize=(24,15)), fig_args)
@@ -971,34 +1075,46 @@ class TransTree(sc.prettyobj):
             pl.bar(bins[i]+w025, total_counts[i], width=w05, facecolor=colors[i], label=label)
         pl.xlabel('Number of transmissions per person')
         pl.ylabel('Count')
-        pl.xticks(ticks=bins)
+        if n_bins<max_labels:
+            pl.xticks(ticks=bins)
         pl.legend()
         pl.title('Numbers of events and transmissions')
 
         pl.subplot(2,2,2)
         total = 0
         for i in range(n_bins):
-            new = total_counts[i]/n_trans*100
-            pl.bar(bins[i:], new, width=width, bottom=total, facecolor=colors[i])
-            total += new
-        pl.xticks(ticks=bins)
+            pl.bar(bins[i:], total_counts[i], width=width, bottom=total, facecolor=colors[i])
+            total += total_counts[i]
+        if n_bins<max_labels:
+            pl.xticks(ticks=bins)
         pl.xlabel('Number of transmissions per person')
-        pl.ylabel('Proportion of infections caused (%)')
-        pl.title('Proportion of transmissions, by number of transmissions')
+        pl.ylabel('Number of infections caused')
+        pl.title('Number of transmissions, by transmissions per person')
 
         pl.subplot(2,2,4)
         pl.plot(index, sorted_sum, lw=3, c='k', alpha=0.5)
-        for i in range(len(change_inds)):
-            pl.scatter([index[change_inds[i]]], [sorted_sum[change_inds[i]]], s=150, zorder=10, c=[colors[i]], label=f'Transmitted to {i+1} people')
+        n_change_inds = len(change_inds)
+        label_inds = np.linspace(0, n_change_inds, max_labels).round() # Don't allow more than this many labels
+        for i in range(n_change_inds):
+            if i in label_inds: # Don't plot more than this many labels
+                label = f'Transmitted to {bins[i+1]:n} people'
+            else:
+                label = None
+            pl.scatter([index[change_inds[i]]], [sorted_sum[change_inds[i]]], s=150, zorder=10, c=[colors[i]], label=label)
         pl.xlabel('Proportion of population, ordered by the number of people they infected (%)')
         pl.ylabel('Proportion of infections caused (%)')
         pl.legend()
         pl.ylim([0, 100])
+        pl.grid(True)
         pl.title('Proportion of transmissions, by proportion of population')
 
-        pl.axes([0.25, 0.65, 0.2, 0.2])
-        berry = [0.8,0.1,0.2]
-        pl.plot(self.sim_results.t, self.sim_results.cum_infections, lw=2, c=berry)
+        pl.axes([0.30, 0.65, 0.15, 0.2])
+        berry      = [0.8, 0.1, 0.2]
+        dirty_snow = [0.9, 0.9, 0.9]
+        start_day  = self.day(start_day, which='start')
+        end_day    = self.day(end_day, which='end')
+        pl.axvspan(start_day, end_day, facecolor=dirty_snow)
+        pl.plot(self.sim_results['t'], self.sim_results['cum_infections'], lw=2, c=berry)
         pl.xlabel('Day')
         pl.ylabel('Cumulative infections')
 

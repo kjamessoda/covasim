@@ -69,7 +69,6 @@ class Sim(cvb.BaseSim):
         self.load_data(datafile, datacols) # Load the data, if provided
         if self.load_pop:
             self.load_population(popfile)      # Load the population, if provided
-
         return
 
 
@@ -332,7 +331,7 @@ class Sim(cvb.BaseSim):
             # Load from disk or use directly
             if isinstance(popfile, str): # It's a string, assume it's a filename
                 filepath = sc.makefilepath(filename=popfile, **kwargs)
-                obj = sc.loadobj(filepath)
+                obj = cvm.load(filepath)
                 if self['verbose']:
                     print(f'Loading population from {filepath}')
             else:
@@ -345,7 +344,7 @@ class Sim(cvb.BaseSim):
                 layer_keys   = self.popdict['layer_keys']
             elif isinstance(obj, cvb.BasePeople):
                 self.people = obj
-                self.people.pars = self.pars # Replace the saved parameters with this simulation's
+                self.people.set_pars(self.pars) # Replace the saved parameters with this simulation's
                 n_actual    = len(self.people)
                 layer_keys  = self.people.layer_keys()
             else:
@@ -414,19 +413,23 @@ class Sim(cvb.BaseSim):
     def rescale(self):
         ''' Dynamically rescale the population -- used during step() '''
         if self['rescale']:
-            t = self.t
             pop_scale = self['pop_scale']
-            current_scale = self.rescale_vec[t]
+            current_scale = self.rescale_vec[self.t]
             if current_scale < pop_scale: # We have room to rescale
-                n_not_sus = self.people.count_not('susceptible')
-                n_people = len(self.people)
-                if n_not_sus / n_people > self['rescale_threshold']: # Check if we've reached point when we want to rescale
-                    max_ratio = pop_scale/current_scale # We don't want to exceed this
-                    scaling_ratio = min(self['rescale_factor'], max_ratio)
-                    self.rescale_vec[t:] *= scaling_ratio # Update the rescaling factor from here on
-                    n = int(n_people*(1.0-1.0/scaling_ratio)) # For example, rescaling by 2 gives n = 0.5*n_people
-                    new_sus_inds = cvu.choose(max_n=n_people, n=n) # Choose who to make susceptible again
-                    self.people.make_susceptible(new_sus_inds)
+                not_sus_inds = self.people.false('susceptible') # Find everyone not susceptible
+                n_not_sus = len(not_sus_inds) # Number of people who are not susceptible
+                n_people = len(self.people) # Number of people overall
+                current_ratio = n_not_sus/n_people # Current proportion not susceptible
+                threshold = self['rescale_threshold'] # Threshold to trigger rescaling
+                if current_ratio > threshold: # Check if we've reached point when we want to rescale
+                    max_ratio = pop_scale/current_scale # We don't want to exceed the total population size
+                    proposed_ratio = max(current_ratio/threshold, self['rescale_factor']) # The proposed ratio to rescale: the rescale factor, unless we've exceeded it
+                    scaling_ratio = min(proposed_ratio, max_ratio) # We don't want to scale by more than the maximum ratio
+                    self.rescale_vec[self.t:] *= scaling_ratio # Update the rescaling factor from here on
+                    n = int(round(n_not_sus*(1.0-1.0/scaling_ratio))) # For example, rescaling by 2 gives n = 0.5*not_sus_inds
+                    choices = cvu.choose(max_n=n_not_sus, n=n) # Choose who to make susceptible again
+                    new_sus_inds = not_sus_inds[choices] # Convert these back into indices for people
+                    self.people.make_susceptible(new_sus_inds) # Make people susceptible again
         return
 
 
@@ -524,20 +527,20 @@ class Sim(cvb.BaseSim):
         return
 
 
-    def run(self, do_plot=False, until=None, verbose=None, restore_pars=True, reset_seed=True, **kwargs):
+    def run(self, do_plot=False, until=None, restore_pars=True, reset_seed=True, verbose=None, **kwargs):
         '''
         Run the simulation.
 
         Args:
             do_plot (bool): whether to plot
             until (int): day to run until
-            verbose (int): level of detail to print (otherwise uses self['verbose'])
             restore_pars (bool): whether to make a copy of the parameters before the run and restore it after, so runs are repeatable
             reset_seed (bool): whether to reset the random number stream immediately before run
-            kwargs (dict): passed to self.plot()
+            verbose (float): level of detail to print, e.g. 0 = no output, 0.2 = print every 5th day, 1 = print every day
+            kwargs (dict): passed to sim.plot()
 
         Returns:
-            results: the results object (also modifies in-place)
+            results (dict): the results object (also modifies in-place)
         '''
 
         # Initialize
@@ -560,14 +563,15 @@ class Sim(cvb.BaseSim):
         for t in self.tvec:
 
             # Print progress
-            if verbose >= 1:
+            if verbose:
                 elapsed = sc.toc(output=True)
                 simlabel = f'"{self.label}": ' if self.label else ''
                 string = f'  Running {simlabel}{self.datevec[t]} ({t:2.0f}/{self.pars["n_days"]}) ({elapsed:0.2f} s) '
                 if verbose >= 2:
                     sc.heading(string)
-                elif verbose == 1:
-                    sc.progressbar(t+1, self.npts, label=string, length=20, newline=True)
+                else:
+                    if not (t % int(1.0/verbose)):
+                        sc.progressbar(t+1, self.npts, label=string, length=20, newline=True)
 
             # Do the heavy lifting -- actually run the model!
             self.step()
@@ -597,7 +601,8 @@ class Sim(cvb.BaseSim):
     def restore_pars(self, orig_pars):
         ''' Restore the original parameter values, except for the analyzers '''
         analyzers = self['analyzers'] # Make a copy so these don't get wiped
-        self.pars = orig_pars # Restore the original parameters
+        for key,val in orig_pars.items():
+            self.pars[key] = val # So pointers, e.g. in sim.people, get updated as well
         self['analyzers'] = analyzers # Restore the analyzers
         return
 
@@ -930,9 +935,9 @@ class Sim(cvb.BaseSim):
             sim = cv.Sim()
             sim.run()
             agehist = sim.make_age_histogram()
-            fiagehistt.plot()
+            agehist.plot()
         '''
-        agehist = cva.make_age_histogram(self, *args, **kwargs)
+        agehist = cva.age_histogram(sim=self, *args, **kwargs)
         if output:
             return agehist
         else:
