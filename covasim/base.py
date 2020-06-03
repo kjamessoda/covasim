@@ -461,6 +461,7 @@ class BaseSim(ParsObj):
         Save to disk as a gzipped pickle.
 
         Args:
+
             filename (str or None): the name or path of the file to save to; if None, uses stored
             kwargs: passed to makefilepath()
 

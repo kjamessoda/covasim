@@ -4,6 +4,7 @@ Defines functions that work analogously to the functions in the population modul
 
 import covasim.defaults as cvd
 import covasim.people as cvppl
+import covasim.students as stu
 import covasim.utils as cvu
 import numpy as np
 import sciris as sc
@@ -35,7 +36,7 @@ def make_students(sim, save_pop=False, popfile=None, verbose=None, die=True, res
         sim['prognoses'] = cvpars.get_prognoses(sim['prog_by_age'])
 
     # Actually create the people
-    people = cvppl.People(sim.pars, uid=popdict['uid'], age=popdict['age'], sex=popdict['sex'], contacts=popdict['contacts']) # List for storing the people
+    people = stu.Students(sim, uid=popdict['uid'], age=popdict['age'], sex=popdict['sex'], contacts=popdict['contacts']) # List for storing the people
 
     average_age = sum(popdict['age']/pop_size)
     sc.printv(f'Created {pop_size} people, average age {average_age:0.2f} years', 2, verbose)

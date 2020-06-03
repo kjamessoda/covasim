@@ -15,7 +15,7 @@ import sciris as sc
 class SimCampus(cvs.Sim):
 
     def __init__(self, pars=None, datafile=None, datacols=None, label=None, simfile=None, popfile=None, load_pop=False, save_pop=False, debug= False, **kwargs):
-        super().__init__()
+        super().__init__(kwargs)
         self['pop_type'] = 'campus' #This is just bookkeeping right now
         self.age_dist = {'dist':'uniform', 'par1':18, 'par2':22} #This new parameter provides a function for the age distribution of People objects
         self.debug = debug #This data member communicates whether the simulation is being used for software testing
@@ -24,16 +24,10 @@ class SimCampus(cvs.Sim):
             self.dorms = cvb.FlexDict({'a':cvbc.Dorm(2,[2,2,2],[2,2,2]),
                             'b':cvbc.Dorm(3,[3,3],[2,2])}) #For now, I am hard coding a Dorm object into the class until I can do something more specific
         else:
+            #For now, I am hard coding a Dorm object into the class until I can do something more specific
             self.dorms = cvb.FlexDict({'DanaEnglish':cvbc.Dorm(2,[10,15,15],[2,2,2]),
-                            'MountainView':cvbc.Dorm(2,[4,4,4,4,4],[8,14,14,5,5])}) #For now, I am hard coding a Dorm object into the class until I can do something more specific
-
-        #TODO: Change these from placeholders to true default values
-        self['beta_layer']  = {'r': 1 ,'b': 1,'f': 1,'c': 1} #Set defaults for the layer-specific parameters and establish what layers are present 
-        self['contacts']    = {'r': -1,'b': 3,'f': 5,'c': 20}
-        self['iso_factor']  = {'r': 1 ,'b': 1,'f': 1,'c': 1}
-        self['quar_factor'] = {'r': 1 ,'b': 1,'f': 1,'c': 1}
-        #TODO: Some layers will be dynamic in time, but we will need to update how this is handled in self.step()
-        self['dynam_layer'] = {'r': 0 ,'b': 0,'f': 0,'c': 0}
+                            'MountainView':cvbc.Dorm(2,[4,4,4,4,4],[8,14,14,5,5]),
+                            'Commons':cvbc.Dorm(4,[13,13,13],[3,3,3])}) #I feel particularly uncertain about this structure; there are 12 fewer people here than there should be
 
         self.dorm_offsets = np.array([0] * (len(self.dorms) + 1)) #This array records the first agent ID for each Dorm object in self.dorms
         self['pop_size'] = 0 #Update the population size to match the number of People in self.dorms
@@ -45,8 +39,15 @@ class SimCampus(cvs.Sim):
             counter += new
 
         self.dorm_offsets[-1] = self['pop_size'] #The population size is added as a convenience for later functions
-        #TODO: We need to find a way to update the parameters again without overwriting the instructions above
-        #self.update_pars(self.pars, **kwargs)   # We have to update the parameters again in case any of the above overwrote a user provided value
+        self.update_pars(pars, **kwargs)   # We have to update the parameters again in case any of the above overwrote a user provided value
+
+        #TODO: Change these from placeholders to true default values
+        self['beta_layer']  = {'r': 1 ,'b': 1,'f': 1,'c': 1} #Set defaults for the layer-specific parameters and establish what layers are present 
+        self['contacts']    = {'r': -1,'b': 3,'f': 5,'c': 10}
+        self['iso_factor']  = {'r': 0 ,'b': 0,'f': 0,'c': 0}
+        self['quar_factor'] = {'r': 1 ,'b': 1,'f': 1,'c': 1}
+        self['dynam_layer'] = {'r': False ,'b': True,'f': True,'c': True}
+
 
 
     def init_people(self, save_pop=False, load_pop=False, popfile=None, verbose=None, **kwargs):
@@ -72,6 +73,7 @@ class SimCampus(cvs.Sim):
         # Actually make the people
         self.people = cvpc.make_students(self, save_pop=save_pop, popfile=popfile, verbose=verbose, **kwargs)
         self.people.initialize() # Fully initialize the people
+
 
         # Create the seed infections
         inds = cvu.choose(self['pop_size'], self['pop_infected'])
