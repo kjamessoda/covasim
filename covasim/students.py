@@ -29,5 +29,8 @@ class Students(cvppl.People):
         for lkey in dynam_keys:
             self.contacts[lkey].validate()
 
+        if self.sim.watcher:
+            self.sim.watcher.write(str(len(self.contacts)/self.sim['pop_size'])+",")
+
         return self.contacts
 

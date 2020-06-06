@@ -14,20 +14,19 @@ import sciris as sc
 
 class SimCampus(cvs.Sim):
 
-    def __init__(self, pars=None, datafile=None, datacols=None, label=None, simfile=None, popfile=None, load_pop=False, save_pop=False, debug= False, **kwargs):
-        super().__init__(kwargs)
+    def __init__(self, pars=None, datafile=None, datacols=None, label=None, simfile=None, popfile=None, load_pop=False, save_pop=False, dorms = None, debug= False, **kwargs):
+        super().__init__(pars, datafile, datacols, label, simfile, popfile, load_pop, save_pop,**kwargs)
+        #super().__init__(**kwargs)
         self['pop_type'] = 'campus' #This is just bookkeeping right now
         self.age_dist = {'dist':'uniform', 'par1':18, 'par2':22} #This new parameter provides a function for the age distribution of People objects
         self.debug = debug #This data member communicates whether the simulation is being used for software testing
 
-        if self.debug:
+        if dorms:
+            self.dorms = dorms
+        else:
             self.dorms = cvb.FlexDict({'a':cvbc.Dorm(2,[2,2,2],[2,2,2]),
                             'b':cvbc.Dorm(3,[3,3],[2,2])}) #For now, I am hard coding a Dorm object into the class until I can do something more specific
-        else:
-            #For now, I am hard coding a Dorm object into the class until I can do something more specific
-            self.dorms = cvb.FlexDict({'DanaEnglish':cvbc.Dorm(2,[10,15,15],[2,2,2]),
-                            'MountainView':cvbc.Dorm(2,[4,4,4,4,4],[8,14,14,5,5]),
-                            'Commons':cvbc.Dorm(4,[13,13,13],[3,3,3])}) #I feel particularly uncertain about this structure; there are 12 fewer people here than there should be
+        self.validate_dorms()
 
         self.dorm_offsets = np.array([0] * (len(self.dorms) + 1)) #This array records the first agent ID for each Dorm object in self.dorms
         self['pop_size'] = 0 #Update the population size to match the number of People in self.dorms
@@ -41,13 +40,30 @@ class SimCampus(cvs.Sim):
         self.dorm_offsets[-1] = self['pop_size'] #The population size is added as a convenience for later functions
         self.update_pars(pars, **kwargs)   # We have to update the parameters again in case any of the above overwrote a user provided value
 
-        #TODO: Change these from placeholders to true default values
-        self['beta_layer']  = {'r': 1 ,'b': 1,'f': 1,'c': 1} #Set defaults for the layer-specific parameters and establish what layers are present 
-        self['contacts']    = {'r': -1,'b': 3,'f': 5,'c': 10}
-        self['iso_factor']  = {'r': 0 ,'b': 0,'f': 0,'c': 0}
-        self['quar_factor'] = {'r': 1 ,'b': 1,'f': 1,'c': 1}
+        self['beta_layer']  = {'r':  1,'b': 1,'f': 1,'c': 1} #Set defaults for the layer-specific parameters and establish what layers are present 
+        self['contacts']    = {'r': -1,'b': 3,'f': 3,'c': 3}
+        self['iso_factor']  = {'r':  0,'b': 0,'f': 0,'c': 0}
+        self['quar_factor'] = {'r':  0,'b': 0,'f': 0,'c': 0}
         self['dynam_layer'] = {'r': False ,'b': True,'f': True,'c': True}
 
+        #Check if the user provided values for any of the layer-centric parameters
+        for key,value in kwargs.items():
+            if key == 'beta_layer':
+                self['beta_layer']  = value
+            if key == 'contacts':
+                self['contacts']  = value
+            if key == 'iso_factor':
+                self['iso_factor']  = value
+            if key == 'quar_factor':
+                self['quar_factor']  = value
+            if key == 'dynam_layer':
+                self['dynam_layer']  = value
+
+
+        if debug:
+            self.watcher = open("watcher.csv",'w')
+        else:
+            self.watcher = None
 
 
     def init_people(self, save_pop=False, load_pop=False, popfile=None, verbose=None, **kwargs):
@@ -140,5 +156,16 @@ class SimCampus(cvs.Sim):
         # Optionally handle layer parameters
         if validate_layers:
             self.validate_layer_pars()
+
+        return
+
+    def validate_dorms(self):
+        '''This function will validate that self.dorms has the correct types'''
+        if not isinstance(self.dorms,cvb.FlexDict):
+            raise TypeError("SimCampus.dorms must be class covasim.base.FlexDict")
+
+        for element in self.dorms.values():
+            if not isinstance(element,cvbc.Dorm):
+                raise TypeError("The elements of SimCampus.dorms must be class covasim.baseCampus.Dorm")
 
         return

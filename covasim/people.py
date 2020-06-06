@@ -386,7 +386,6 @@ class People(cvb.BasePeople):
         Returns:
             Whether or not this person tested positive
         '''
-
         inds = np.unique(inds)
         self.tested[inds] = True
         self.date_tested[inds] = self.t # Only keep the last time they tested
