@@ -51,3 +51,36 @@ class Dorm(cvb.FlexDict):
 
     def __len__(self):
         return len(self['r'])
+
+    def __eq__(self,otherDorm):
+        if not isinstance(otherDorm,Dorm):
+            raise ValueError("One of the objects is not a Dorm object")
+
+        result = None
+        if len(self['r']) != len(otherDorm['r']):
+            result = False
+        else:
+            result = (self['r'] == otherDorm['r']).all() and (self['b'] == otherDorm['b']).all() and (self['f'] == otherDorm['f']).all()
+
+        return result
+
+def autoCreateDorms(nDorms,room,bathroom,floor,dormName = "dorm"):
+    '''
+    Auto-Generate a dict of Dorm objects with identical room-bathroom-floor structures. 
+
+    Args:
+        nDorms    (int)  : number of Dorm objects to place into the list
+        room      (int)  : number of residents in each room of the residence hall
+        bathroom  (int[]): number of rooms that share a bathroom on each floor of the residence hall
+        floor     (int[]): number of bathrooms on each floor of the residence hall
+        dormName (String): (optional) base name for each Dorm object's key. The actual key name will be this String
+                            with an underscore and an integer (e.g., dorm_1)
+
+    Returns
+    dict (Dorm); a dictionary of Dorm objects, each with the same structure.
+    '''
+    returnDict = {}
+
+    for i in range(nDorms):
+        returnDict[dormName + '_' + str(i)] = Dorm(room,bathroom,floor) 
+    return returnDict

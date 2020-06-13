@@ -4,6 +4,7 @@ Defines the Student class, which is a subclass of People. It adds and modifies f
 
 import covasim.people as cvppl
 import covasim.populationCampus as cvpc
+import numpy as np
 
 class Students(cvppl.People):
     def __init__(self, sim, strict=True, **kwargs):
@@ -34,3 +35,17 @@ class Students(cvppl.People):
 
         return self.contacts
 
+    def test(self, inds, test_sensitivity=1.0, loss_prob=0.0, test_delay=0,end_quarantine = False):
+        '''
+        This function is identical to the superclass function, but it provides the option to remove an agent from quarantine upon a negative result
+        using the end_quarantine argument.
+        '''
+        super().test(inds, test_sensitivity, loss_prob, test_delay)
+
+        if end_quarantine:
+            if loss_prob != 0:
+                raise ValueError("Currently, end_quarantine cannot be True if loss_prob is non-zero.")
+            neg_indices =  np.logical_and(self.date_tested == self.t,self.date_pos_test != self.t)
+            self.date_end_quarantine[neg_indices] = self.t + test_delay
+
+        return
