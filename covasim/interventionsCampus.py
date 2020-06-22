@@ -7,6 +7,23 @@ import covasim.utils as cvu
 import numpy as np
 import sciris as sc
 
+
+def check_schedule(currentDay,schedule,front = True):
+    '''
+    Convenience function. It returns False if schedule has length zero or if its first (front = True) or last (front = False) 
+    element is greater than currentDay. It returns True otherwise.
+    '''
+    if front:
+        i = 0
+    else:
+        i = -1
+
+    if len(schedule):
+        result = currentDay >= schedule[i]
+    else:
+        result = False
+    return result
+
 def weekly_testing(sim):
     '''This helper function will implement a test_num or test_prob intervention on a weekly basis'''
     if sim.t%7 == 0:
@@ -15,6 +32,38 @@ def weekly_testing(sim):
         indices = [True] * sim['pop_size']
 
     return indices
+
+
+#These classes provide different schemes for generating pools in pooled sampling
+class RandomTestingPools:
+    '''
+    This is the simplest scheme. It provides a requested number of pools, each of the same size.
+
+    Args:
+        nPools   (int): Number of pools to generate
+        nSamples (int): Number of agents per pool
+        lock (Boolean): Whether only one set of pools should be generated (True) or if a new set of pools should
+                        be called every time the member function create is called (False; default).
+
+    '''
+    def __init__(self,nPools,nSamples,lock = False):
+        #Store arugments
+        self.nPools   = nPools
+        self.nSamples = nSamples
+        self.lock     = lock
+
+        #Create slots for the pools
+        self.pools    = None
+
+    def create(self,sim):
+        if not (self.pools and self.lock):
+            self.pools = {}
+            allPools   = np.random.choice(sim['pop_size'],(self.nPools,self.nSamples),replace = False)
+            for i in range(self.nPools):
+                self.pools["pool_" + str(i)] = allPools[i,:]
+        return self.pools
+
+
 
 class symptomQuarantine(cvi.Intervention):
     '''
@@ -33,8 +82,8 @@ class symptomQuarantine(cvi.Intervention):
 
     **Examples**::
 
-        interv = (symp_prob=0.5) # The probability that a symptomatic person will be identified, quarantined and 
-                                      tested is 0.5.
+        interv = symptomQuarantine(symp_prob=0.5) # The probability that a symptomatic person will be identified, quarantined and 
+                                                    tested is 0.5.
 
     '''
     def __init__(self, symp_prob, subtarget=None, ili_prev=None,test_sensitivity=1.0,
@@ -81,6 +130,109 @@ class symptomQuarantine(cvi.Intervention):
         #Quarantine and test the selected indices
         sim.people.quarantine(reportedInds)
         sim.people.test(reportedInds, self.test_sensitivity, 0.0, self.test_delay, True)
+
+        return 
+
+
+class PooledTesting(cvi.Intervention):
+    '''
+    Test a pool of individuals for COVID. Upon a positive result, quarantine the individuals and implement individual
+    tests on each member of the pool.
+
+    Args:
+        poolGenerator(dict or function): Either a dict where each value is an array listing the individuals 
+            in one pool or a function that returns such a dict. If a function, there should be one argument, 
+            the Sim object.
+        schedule (int or []String or []int): If a list, the days in the simulation where a pooled test should be implemented.
+            Dates can be specified as in-simulation dates (i.e., int) or as Strings (run sciris.readdate() for acceptable formats). 
+            If an int, a pooled tests will be implemented serially this number of days apart.
+        test_sensitivity (float): Probability of a true positive
+        test_delay (int): How long testing takes
+        start_day (int): When to start the intervention
+        end_day (int): When to end the intervention
+        kwargs (dict): passed to Intervention()
+
+    **Examples**::
+    '''
+
+    def __init__(self, poolGenerator,schedule=None,test_sensitivity=1.0,
+                    test_delay=0, start_day=0, end_day=None, debug = False,**kwargs):
+        super().__init__(**kwargs)
+        self._store_args()
+        self.poolGenerator     = poolGenerator
+        self.pooledSchedule    = schedule
+        self.test_sensitivity  = test_sensitivity
+        self.test_delay        = test_delay
+        self.start_day         = start_day
+        self.end_day           = end_day
+        self.debug             = debug
+
+        #Additonal members that facilitate the Intervention's operations
+        self.individualSchedule = []
+        self.individualsToTest  = []
+
+        return
+
+
+    def initialize(self,sim):
+        '''This is borrowed from interventions.test_prob'''
+        self.start_day      = sim.day(self.start_day)
+        if self.end_day is None:
+            if sim['end_day'] is None:
+                self.end_day = sim['n_days']
+            else:
+                self.end_day = sim['end_day']
+        self.end_day        = sim.day(self.end_day)
+        self.days           = [self.start_day, self.end_day]
+        if isinstance(self.pooledSchedule,list):
+            #The schedule has a stack-like structure for efficiency. The -1 indicates that there are no more pooled tests scheduled.
+            if len(self.pooledSchedule) == 1:
+                self.pooledSchedule = [sim.day(self.pooledSchedule)]
+            else:
+                self.pooledSchedule = sim.day(self.pooledSchedule).sort(reverse = True)
+        elif isinstance(self.pooledSchedule,int):
+            tempStorage = [self.start_day]
+            print(self.end_day)
+            while tempStorage[-1] + self.pooledSchedule <= self.end_day:
+                tempStorage += [tempStorage[-1] + self.pooledSchedule]
+            tempStorage.sort(reverse = True)
+            self.pooledSchedule = tempStorage
+        self.initialized    = True
+        return
+
+    def apply(self, sim):
+        '''Some of this code is also borrowed from interventions.test_prob'''
+        t = sim.t
+        if t < self.start_day:
+            return
+        elif self.end_day is not None and t > self.end_day:
+            return
+
+        #Implement a pooled test, if one is scheduled
+        if check_schedule(t,self.pooledSchedule,False):
+            print("Implementing pooled testing.")
+            if callable(self.poolGenerator):
+                currentPools = self.poolGenerator(sim)
+            else:
+                currentPools = self.poolGenerator
+
+            newSchedule, newPools    = sim.people.test_pooled(currentPools,self.test_sensitivity, self.test_delay)
+            self.individualSchedule += newSchedule
+            self.individualsToTest  += newPools
+            self.pooledSchedule.pop()
+
+            if self.debug:
+                print(currentPools)
+
+        #Implement individual tests, if one is scheduled        
+        while check_schedule(t,self.individualSchedule):
+            currentPool = self.individualsToTest.pop(0)
+            #The Intervention places individuals into quarantine directly. If sim.step() places them in quarantine, the 
+            #   schedule for removing individuals that test negative becomes inaccurate.
+            sim.people.quarantined[currentPool] = True 
+
+            sim.people.test(currentPool, self.test_sensitivity, 0.0, self.test_delay, True)
+            self.individualSchedule.pop(0)
 
         return 
 

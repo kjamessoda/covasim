@@ -66,6 +66,18 @@ class SimCampus(cvs.Sim):
             self.watcher = None
 
 
+    def step(self):
+        '''
+        This is a modification of the superclass function. Mostly it calls the super class function, but
+        it logs an additional stock that is not present in Sim objects.
+        '''
+        super().step()
+        #TODO: Add the code to update the new stock
+        self.results["n_quarantineDorm"][self.t - 1] = self.people.quarantined.sum() + np.logical_and(self.people.diagnosed,~self.people.recovered).sum()
+
+        return
+
+
     def init_people(self, save_pop=False, load_pop=False, popfile=None, verbose=None, **kwargs):
         '''
         This is a modification of the superclass function.
@@ -94,6 +106,20 @@ class SimCampus(cvs.Sim):
         # Create the seed infections
         inds = cvu.choose(self['pop_size'], self['pop_infected'])
         self.people.infect(inds=inds, layer='seed_infection')
+        return
+
+
+    def init_results(self):
+        '''
+        This is a modification of the superclass function. Mostly it calls the super class function, but
+        it creates a new stock channel.        
+        '''
+        super().init_results()
+
+        #Create a new stock channel to record the number of students in quaratine *or* isolation; the color is shared 
+        #   with quarantined.
+        self.results["n_quarantineDorm"] = cvb.Result(name="n_quarantineDorm", npts=self.npts, scale='dynamic', color='#5f1914')
+
         return
 
 
