@@ -7,6 +7,8 @@ import covasim.utils as cvu
 import numpy as np
 import sciris as sc
 
+import random
+
 
 def check_schedule(currentDay,schedule,front = True):
     '''
@@ -64,7 +66,58 @@ class RandomTestingPools:
         return self.pools
 
 
+class FloorTargetedPools:
+    '''
+    Generate a sampling scheme in which a (roughly) set proportion of agents associated with floor in a Dorm object are 
+    included in a pool, where every agent in the same pool is from the same pool and floor, and one agent from every room
+    is sampled before multiple agents from the same room.
 
+    Args:
+        sampleProportion (float): The (approximate) proportion of agents that should be sampled. It is only approximate
+                                  because there is some rounding error involved in the exact number of tests.
+        lock (Boolean)          : Whether only one set of pools should be generated (True) or if a new set of pools should
+                                  be called every time the member function create is called (False; default).
+    '''
+    def __init__(self,sampleProportion,lock = False):
+        self.sampleProportion = sampleProportion
+        self.lock = lock
+
+        #Create slots for the pools
+        self.pools    = {}
+
+
+    def create(self,sim):
+        if not (self.pools and self.lock):
+            self.pools = {}
+            dormCounter = 0
+            for dormName,dorm in sim.dorms.items():
+                currentTotalFloor = max(dorm['f']) + 1
+                for i in range(currentTotalFloor):
+                    samplesToTake = int(round(self.sampleProportion * (dorm['f'] == i).sum()))
+                    if samplesToTake < 1:
+                        continue
+                    newPool       = np.array([-1] * samplesToTake)
+                    uniqueRooms   = set(dorm['r'][dorm['f'] == i])
+                    if samplesToTake < len(uniqueRooms):
+                        sampledRooms = random.sample(uniqueRooms,samplesToTake)
+                    else:
+                        sampledRooms  = list(uniqueRooms)
+                        sampledRooms += random.sample(uniqueRooms,samplesToTake - len(uniqueRooms))
+
+                    poolCounter = 0
+                    for room in sampledRooms:
+                        newPool[poolCounter] = np.random.choice(cvu.true(dorm['r'] == room))
+                        poolCounter += 1
+
+                    self.pools[dormName + "_Floor" + str(i)] = newPool + sim.dorm_offsets[dormCounter]
+                dormCounter += 1
+
+        return self.pools
+
+
+
+
+#These are Intervention classes meant to be used in conjunction with 
 class symptomQuarantine(cvi.Intervention):
     '''
     Identify individuals who have COVID-like symptoms, place them in quarantine, and test them for COVID. This 

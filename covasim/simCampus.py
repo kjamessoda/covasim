@@ -25,7 +25,7 @@ class SimCampus(cvs.Sim):
             self.dorms = dorms
         else:
             self.dorms = cvb.FlexDict({'a':cvbc.Dorm(2,[2,2,2],[2,2,2]),
-                            'b':cvbc.Dorm(3,[3,3],[2,2])}) #For now, I am hard coding a Dorm object into the class until I can do something more specific
+                            'b':cvbc.Dorm(3,[3,3],[2,2])}) 
         self.validate_dorms()
 
         self.dorm_offsets = np.array([0] * (len(self.dorms) + 1)) #This array records the first agent ID for each Dorm object in self.dorms
