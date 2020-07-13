@@ -1,6 +1,39 @@
-######################################################DISCLAIMERS#################################################################################
+========================================================DISCLAIMERS===============================================================================
 The work presented in this forked repository extends that of the Institute for Disease Modeling's Covasim model. As such, it is subject to the 
 same Creative Commons Attribution-Noncommercial-ShareAlike 4.0 License, contribution policy, code of conduct, and disclaimers as the original model.
 Specifically, I make no guarantee that the code contained within will operate as intended, will fulfill the end-user's needs, or will generate 
 predictions that accurately replicate past, present, or future observations.
+==================================================================================================================================================
+
+==============
+Base Model
+==============
+Details about the original Covasim model are available at http://paper.covasim.org. This README will focus on the features unique to this fork. 
+These files include students.py and all files ending in Campus (e.g., simCampus.py).
+
+
+====================
+Major New Features
+====================
+To utilize the added features in this fork, the user must implement the simulation using a SimCampus object. The SimCampus class works in roughly
+the same manner as the parent Sim class but currently assumes that each individual's age is uniformly distributed between 18 and 22. It also adds
+a new data member called dorms, which is an array of Dorm objects (see below). The Dorm objects help to manage the contact networks in a SimCampus
+object. The contact layers for these networks are roommate contacts ('r'), bathroom contacts ('b'), floor contacts ('f'), and community contacts ('c'). 
+
+The contact networks rely on nested pools. Each individual has a contact with their roommate every day. Then, some number of bathroom contacts are 
+randomly selected from a pool of possible individuals. A bathroom pool is composed of all sets of roommates for some number of rooms. Similarly, floor
+contacts are sampled from a pool that joins together some number of bathroom pools. Finally, community contacts are sampled from a pool of every 
+individual in the model.
+NOTE: The contacts simulation parameter is parameterized differently from the original Covasim. Here, the values represent the number of contact
+    *events* per agent. This means that these values in a SimCampus implementation will be half that of the equivalent in the original Covasim.
+
+
+A set of Dorm objects records the contact structure for one housing unit. It's constructor takes three arguments. The first is the number of individuals
+in a room, the second argument is an array where each element is the number of rooms using the same bathroom, and the third argument is an array where
+each element is the number of bathrooms per floor. 
+
+======================
+COMING SOON
+======================
+Documentation on added interventions and pooled testing.
 
