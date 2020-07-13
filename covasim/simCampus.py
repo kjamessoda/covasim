@@ -72,7 +72,6 @@ class SimCampus(cvs.Sim):
         it logs an additional stock that is not present in Sim objects.
         '''
         super().step()
-        #TODO: Add the code to update the new stock
         self.results["n_quarantineDorm"][self.t - 1] = self.people.quarantined.sum() + np.logical_and(self.people.diagnosed,~self.people.recovered).sum()
 
         return

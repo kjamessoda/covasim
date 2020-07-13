@@ -75,19 +75,29 @@ class FloorTargetedPools:
     Args:
         sampleProportion (float): The (approximate) proportion of agents that should be sampled. It is only approximate
                                   because there is some rounding error involved in the exact number of tests.
+        assureCoverage (Boolean): Whether every floor in a Dorm object should be represented with a pool of at least one individual 
+                                  (False;default).
+        skipQuarantine (Boolean): Whether individuals in quarantine/isolation should be skipped when sampling agents for a pool (False;default).
+        skipDiagnosed  (Boolean): Whether individuals who have previously been diagnosed as COVID positive should be skipped when 
+                                  sampling agents for a pool (False;default).
         lock (Boolean)          : Whether only one set of pools should be generated (True) or if a new set of pools should
                                   be called every time the member function create is called (False; default).
     '''
-    def __init__(self,sampleProportion,lock = False):
+    def __init__(self,sampleProportion,assureCoverage = False,skipQuarantine = False,skipDiagnosed = False,lock = False):
         self.sampleProportion = sampleProportion
         self.lock = lock
+
+        #Instructions on 
+        self.assureCoverage = assureCoverage
+        self.skipQuarantine = skipQuarantine
+        self.skipDiagnosed  = skipDiagnosed
 
         #Create slots for the pools
         self.pools    = {}
 
 
     def create(self,sim):
-        if not (self.pools and self.lock):
+        if not (len(self.pools) != 0 and self.lock):
             self.pools = {}
             dormCounter = 0
             for dormName,dorm in sim.dorms.items():
@@ -95,7 +105,10 @@ class FloorTargetedPools:
                 for i in range(currentTotalFloor):
                     samplesToTake = int(round(self.sampleProportion * (dorm['f'] == i).sum()))
                     if samplesToTake < 1:
-                        continue
+                        if self.assureCoverage:
+                            samplesToTake = 1
+                        else:
+                            continue
                     newPool       = np.array([-1] * samplesToTake)
                     uniqueRooms   = set(dorm['r'][dorm['f'] == i])
                     if samplesToTake < len(uniqueRooms):
@@ -106,10 +119,38 @@ class FloorTargetedPools:
 
                     poolCounter = 0
                     for room in sampledRooms:
-                        newPool[poolCounter] = np.random.choice(cvu.true(dorm['r'] == room))
+                        resample = True
+                        targetedAgents = cvu.true(dorm['r'] == room)
+                        while resample:
+                            #TODO: Find a way to make this work
+                            if len(targetedAgents) == 0:
+                                #uniqueRooms doubles as a collection of rooms that could be sampled. If we know that 
+                                #no agent associated with a room does not fit the desired criteria, the room is removed.
+                                uniqueRooms -= set([room])
+                                #If there are no more rooms that fit the desired criterion, quit searching. 
+                                if len(uniqueRooms) == 0:
+                                    candidate = -1
+                                    break
+                                if len(uniqueRooms) > len(sampledRooms):
+                                    possibleRooms = uniqueRooms - set(sampledRooms) 
+                                    room = random.sample(possibleRooms,1)[0]
+                                else:
+                                    room = random.sample(uniqueRooms,1)[0]
+                                targetedAgents = cvu.true(dorm['r'] == room)
+
+                            candidate = np.random.choice(targetedAgents)
+                            resample = False
+                            if self.skipQuarantine:
+                                resample = resample or sim.people.quarantined[candidate + sim.dorm_offsets[dormCounter]] or (sim.people.diagnosed[candidate + sim.dorm_offsets[dormCounter]] * ~sim.people.recovered[candidate + sim.dorm_offsets[dormCounter]])
+                            if self.skipDiagnosed:
+                                resample = resample or sim.people.diagnosed[candidate + sim.dorm_offsets[dormCounter]]
+                            #Remove the candidate from targetedAgents so that if a resample is necessary, the 
+                            #rejected agent will not be selected again.
+                            targetedAgents = targetedAgents[targetedAgents != candidate]
+                        newPool[poolCounter] = candidate
                         poolCounter += 1
 
-                    self.pools[dormName + "_Floor" + str(i)] = newPool + sim.dorm_offsets[dormCounter]
+                    self.pools[dormName + "_Floor" + str(i)] = newPool[newPool != -1] + sim.dorm_offsets[dormCounter]
                 dormCounter += 1
 
         return self.pools
