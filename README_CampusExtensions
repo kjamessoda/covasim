@@ -1,6 +1,6 @@
 ######################################################DISCLAIMERS#################################################################################
 The work presented in this forked repository extends that of the Institute for Disease Modeling's Covasim model. As such, it is subject to the 
 same Creative Commons Attribution-Noncommercial-ShareAlike 4.0 License, contribution policy, code of conduct, and disclaimers as the original model.
-Specifically, I make no guarantee that the code contained within will operate properly, will fulfill the end-user's needs, or will generate predictions
-that accurately replicate past, present, or future observations.
+Specifically, I make no guarantee that the code contained within will operate as intended, will fulfill the end-user's needs, or will generate 
+predictions that accurately replicate past, present, or future observations.
 
