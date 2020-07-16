@@ -36,7 +36,7 @@ def weekly_testing(sim):
     return indices
 
 
-#These classes provide different schemes for generating pools in pooled sampling
+#These classes provide different schemes for generating pools in pooled sampling and other targeted sampling
 class RandomTestingPools:
     '''
     This is the simplest scheme. It provides a requested number of pools, each of the same size.
@@ -68,9 +68,9 @@ class RandomTestingPools:
 
 class FloorTargetedPools:
     '''
-    Generate a sampling scheme in which a (roughly) set proportion of agents associated with floor in a Dorm object are 
+    Generate a sampling scheme in which a (roughly) set proportion of agents associated with a floor in a Dorm object are 
     included in a pool, where every agent in the same pool is from the same pool and floor, and one agent from every room
-    is sampled before multiple agents from the same room.
+    is sampled before multiple agents from the same room (this latter criteria has not yet been tested).
 
     Args:
         sampleProportion (float): The (approximate) proportion of agents that should be sampled. It is only approximate
@@ -82,8 +82,10 @@ class FloorTargetedPools:
                                   sampling agents for a pool (False;default).
         lock (Boolean)          : Whether only one set of pools should be generated (True) or if a new set of pools should
                                   be called every time the member function create is called (False; default).
+        collapse (Boolean)      : Whether the pooled structure should be collapsed down to a single numpy.array (False; default). This allows
+                                  this class to be used without pooled testing.
     '''
-    def __init__(self,sampleProportion,assureCoverage = False,skipQuarantine = False,skipDiagnosed = False,lock = False):
+    def __init__(self,sampleProportion,assureCoverage = False,skipQuarantine = False,skipDiagnosed = False,lock = False,collapse = False):
         self.sampleProportion = sampleProportion
         self.lock = lock
 
@@ -91,6 +93,7 @@ class FloorTargetedPools:
         self.assureCoverage = assureCoverage
         self.skipQuarantine = skipQuarantine
         self.skipDiagnosed  = skipDiagnosed
+        self.collapse       = collapse
 
         #Create slots for the pools
         self.pools    = {}
@@ -152,6 +155,8 @@ class FloorTargetedPools:
 
                     self.pools[dormName + "_Floor" + str(i)] = newPool[newPool != -1] + sim.dorm_offsets[dormCounter]
                 dormCounter += 1
+        if self.collapse:
+            self.pools = np.concatenate(list(self.pools.values()))
 
         return self.pools
 
@@ -212,18 +217,25 @@ class symptomQuarantine(cvi.Intervention):
             return
 
         #Find all agents that display COVID-like symptoms
+        symp_notMitigate = sim.people.symptomatic * ~sim.people.diagnosed
+        testRecorded     = cvu.false(np.isnan(sim.people.date_tested))
+        pendingTest      = testRecorded[sim.t - sim.people.date_tested[testRecorded] < self.test_delay]
+        symp_notMitigate[pendingTest] = False
         if self.ili_prev is None:
-            covidLikeInds = cvu.true(sim.people.symptomatic)
+            covidLikeInds = cvu.true(symp_notMitigate)
         else:
             rel_t = t - self.start_day
-            ili_indices   = cvu.n_binomial(self.ili_prev[rel_t],sim['pop_size'])
-            covidLikeInds = cvu.true(np.logical_or(ili_indices,sim.people.symptomatic))
+            ili_indices      = cvu.n_binomial(self.ili_prev[rel_t],sim['pop_size'])
+            covidLikeInds    = cvu.true(np.logical_or(ili_indices,symp_notMitigate))
 
         reportedInds  = cvu.binomial_filter(self.symp_prob,covidLikeInds)
+
 
         #Quarantine and test the selected indices
         sim.people.quarantine(reportedInds)
         sim.people.test(reportedInds, self.test_sensitivity, 0.0, self.test_delay, True)
+
+        sim.results['new_tests'][t] += int(len(reportedInds)*sim['pop_scale']/sim.rescale_vec[t]) # If we're using dynamic scaling, we have to scale by pop_scale, not rescale_vec
 
         return 
 
@@ -330,3 +342,93 @@ class PooledTesting(cvi.Intervention):
 
         return 
 
+
+class TestScheduler(cvi.Intervention):
+    '''
+    This is a relatively simple Intervention class. It works comparably to the PooledTesting class in that it can handle detailed 
+    schedules for when to implement tests and facilitates detailed targeted testing. However, it focuses on individual testing rather
+    than pooled testing. 
+
+    Args:
+        sampleGenerator(numpy.array or function): Either a numpy.array listing the individuals that should be tested according to the
+                                                  schedule or a function that returns such an array. If a function, there should be one 
+                                                  argument, the Sim object.
+        schedule (int or []String or []int)     : If a list, the days in the simulation where a pooled test should be implemented.
+                                                  Dates can be specified as in-simulation dates (i.e., int) or as Strings (run 
+                                                  sciris.readdate() for acceptable formats). If an int, a pooled tests will be 
+                                                  implemented serially this number of days apart.
+        start_date (int or String)              : The first day that testing should be implemented, either via an in-simulation date 
+                                                  (i.e., int) or as a String (run sciris.readdate() for acceptable formats)  (0; default). 
+                                                  This argument is only used if schedule is a single int; otherwise, the first test is 
+                                                  run on the first day specified in schedule.
+        end_date (int or String)                : The last day that testing *could* be implemented, either via an in-simulation date 
+                                                  (i.e., int) or as a String (run sciris.readdate() for acceptable formats) (last simulated 
+                                                  day; default). This argument is only used if schedule is a single int; otherwise, the 
+                                                  last test is run on the last day specified in schedule.
+        test_sensitivity (float)                : Probability of a true positive
+        test_delay (int)                        : How long testing takes
+        loss_prob  (float)                      : Probability that an individual with a positive test will be lossed to follow up (i.e.,
+                                                  will not have a record of their diagnosis and will not enter isolation)
+        end_quarantine (Boolean)                : Whether a negative test result should end an individual's quarantine (False; default). 
+                                                  This is only possible using a SimCampus object.
+        kwargs (dict)                           : passed to Intervention()
+
+    **Examples**::
+    '''
+
+    def __init__(self, sampleGenerator,schedule,start_date = 0,end_date = None,test_sensitivity=1.0,
+                    test_delay=0, loss_prob = 0., end_quarantine = False,**kwargs):
+        super().__init__(**kwargs)
+        self._store_args()
+        self.sampleGenerator   = sampleGenerator
+        self.schedule          = schedule
+        self.start_date        = start_date
+        self.end_date          = end_date
+        self.test_sensitivity  = test_sensitivity
+        self.test_delay        = test_delay
+        self.loss_prob         = loss_prob
+        self.end_quarantine    = end_quarantine
+
+        return
+
+    def initialize(self,sim):
+        if isinstance(self.schedule,list):
+            #The schedule has a stack-like structure for efficiency.
+            if len(self.schedule) == 1:
+                self.schedule = [sim.day(self.schedule)]
+            else:
+                self.schedule = sim.day(self.schedule)
+                self.schedule.sort(reverse = True)
+        elif isinstance(self.schedule,int):
+            tempStorage = [sim.day(self.start_date)]
+            if not self.end_date:
+                self.end_date = sim['n_days']
+            while tempStorage[-1] + self.schedule <= self.end_date:
+                tempStorage += [tempStorage[-1] + self.schedule]
+            tempStorage.sort(reverse = True)
+            self.schedule = tempStorage
+        self.days           = self.schedule
+        self.initialized    = True
+        return
+
+
+    def apply(self, sim):
+        '''Some of this code is also borrowed from interventions.test_prob'''
+        t = sim.t
+
+        #Implement tests, if they are scheduled
+        if check_schedule(t,self.schedule,False):
+            if callable(self.sampleGenerator):
+                currentSample = self.sampleGenerator(sim)
+            else:
+                currentSample = self.sampleGenerator
+
+            #The decision to end an individual's quarantine is decided via an independent control statement so that this
+            #   Intervention class will work with the original Covasim
+            if self.end_quarantine:
+                sim.people.test(currentSample,self.test_sensitivity,self.loss_prob,self.test_delay,True)
+            else:
+                sim.people.test(currentSample,self.test_sensitivity,self.loss_prob,self.test_delay)
+            self.schedule.pop()
+
+        return 
