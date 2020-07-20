@@ -314,6 +314,8 @@ class PooledTesting(cvi.Intervention):
         elif self.end_day is not None and t > self.end_day:
             return
 
+        nTests = 0
+
         #Implement a pooled test, if one is scheduled
         if check_schedule(t,self.pooledSchedule,False):
             print("Implementing pooled testing.")
@@ -323,6 +325,8 @@ class PooledTesting(cvi.Intervention):
                 currentPools = self.poolGenerator
 
             newSchedule, newPools    = sim.people.test_pooled(currentPools,self.test_sensitivity, self.test_delay)
+            print(len(currentPools))
+            nTests += len(currentPools)
             self.individualSchedule += newSchedule
             self.individualsToTest  += newPools
             self.pooledSchedule.pop()
@@ -338,8 +342,11 @@ class PooledTesting(cvi.Intervention):
             sim.people.quarantined[currentPool] = True 
 
             sim.people.test(currentPool, self.test_sensitivity, 0.0, self.test_delay, True)
+            nTests += len(currentPool)
             self.individualSchedule.pop(0)
 
+        #This line taken from covasim.interventions.test_prob
+        sim.results['new_tests'][t] += int(nTests*sim['pop_scale']/sim.rescale_vec[t]) # If we're using dynamic scaling, we have to scale by pop_scale, not rescale_vec
         return 
 
 
@@ -430,5 +437,8 @@ class TestScheduler(cvi.Intervention):
             else:
                 sim.people.test(currentSample,self.test_sensitivity,self.loss_prob,self.test_delay)
             self.schedule.pop()
+
+            #This line taken from covasim.interventions.test_prob
+            sim.results['new_tests'][t] += int(len(currentSample)*sim['pop_scale']/sim.rescale_vec[t]) # If we're using dynamic scaling, we have to scale by pop_scale, not rescale_vec
 
         return 
