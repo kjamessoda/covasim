@@ -46,7 +46,7 @@ class SimCampus(cvs.Sim):
         self['quar_factor'] = {'r':  0,'b': 0,'f': 0,'c': 0}
         self['dynam_layer'] = {'r': False ,'b': True,'f': True,'c': True}
 
-        #Check if the user provided values for any of the layer-centric parameters
+        #Check if the user provided values for any of the layer-centric parameters or to alter prognoses. 
         for key,value in kwargs.items():
             if key == 'beta_layer':
                 self['beta_layer']  = value
@@ -118,6 +118,49 @@ class SimCampus(cvs.Sim):
         #Create a new stock channel to record the number of students in quaratine *or* isolation; the color is shared 
         #   with quarantined.
         self.results["n_quarantineDorm"] = cvb.Result(name="n_quarantineDorm", npts=self.npts, scale='dynamic', color='#5f1914')
+
+        return
+
+
+    def update_prognoses(self,addedInfo):
+        '''
+        This function allows the user to elegantly alter sim.prognosis. It also validates that the provided update will operate properly.
+
+        Args:
+            addedInfo = dict; the keys in the dict should be a subset of the keys in the default prognoses (see parameters.py). The values
+                        should be the desired np.array for that key. If 'age_cutoff' is present, all other keys must also be present; otherwise,
+                        keys can be missing so long as the value has the correct length for the default age_cutoff value.  
+        '''
+        prognoses = self.pars['prognoses']
+        print(prognoses)
+        print(prognoses)
+        if 'age_cutoffs' in addedInfo.keys():
+             prognoses = addedInfo
+        else:
+            #Convert the health outcome probabilities back to joint probabilities for later consistency
+            prognoses['severe_probs'] *= prognoses['symp_probs']   
+            prognoses['crit_probs']   *= prognoses['severe_probs'] 
+            prognoses['death_probs']  *= prognoses['crit_probs']   
+
+            #Update the prognoses
+            for key, val in addedInfo.items():
+                prognoses[key] = np.array(val)
+
+        #Convert the health outcome probabilities back to conditional probabilities
+        prognoses['death_probs']  /= prognoses['crit_probs']   # Conditional probability of dying, given critical symptoms
+        prognoses['crit_probs']   /= prognoses['severe_probs'] # Conditional probability of symptoms becoming critical, given severe
+        prognoses['severe_probs'] /= prognoses['symp_probs']   # Conditional probability of symptoms becoming severe, given symptomatic
+
+        #Validate the new prognoses
+        for key, val in prognoses.items():
+            if len(val) != len(prognoses['age_cutoffs']):
+                raise ValueError("The provided value for " + key + " has an improper length.")
+
+            if key in ['symp_probs','severe_probs','crit_probs','death_probs']:
+                if (val < 0.).any() or (val > 1.).any():
+                    raise ValueError("The provided joint probability for " + key + "does not lead to a valid conditional probability.")
+
+        self.pars['prognoses'] = prognoses
 
         return
 
