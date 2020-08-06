@@ -14,7 +14,7 @@ import sciris as sc
 
 class SimCampus(cvs.Sim):
 
-    def __init__(self, pars=None, datafile=None, datacols=None, label=None, simfile=None, popfile=None, load_pop=False, save_pop=False, dorms = None, debug= False, **kwargs):
+    def __init__(self, pars=None, datafile=None, datacols=None, label=None, simfile=None, popfile=None, load_pop=False, save_pop=False, dorms = None, nonResident = 0,n_importsNonRes = None,debug= False, **kwargs):
         super().__init__(pars, datafile, datacols, label, simfile, popfile, load_pop, save_pop,**kwargs)
         #super().__init__(**kwargs)
         self['pop_type'] = 'campus' #This is just bookkeeping right now
@@ -38,13 +38,19 @@ class SimCampus(cvs.Sim):
             counter += new
 
         self.dorm_offsets[-1] = self['pop_size'] #The population size is added as a convenience for later functions
+        self['pop_size'] += nonResident    # Add non-residential students to the population
         self.update_pars(pars, **kwargs)   # We have to update the parameters again in case any of the above overwrote a user provided value
 
-        self['beta_layer']  = {'r':  1,'b': 1,'f': 1,'c': 1} #Set defaults for the layer-specific parameters and establish what layers are present 
+        self['beta_layer']  = {'r':  1,'b': 1,'f': 1,'c': 1} #Set values for SimCampus-specific features
         self['contacts']    = {'r': -1,'b': 3,'f': 3,'c': 3}
         self['iso_factor']  = {'r':  0,'b': 0,'f': 0,'c': 0}
         self['quar_factor'] = {'r':  0,'b': 0,'f': 0,'c': 0}
         self['dynam_layer'] = {'r': False ,'b': True,'f': True,'c': True}
+        #This state allows the user to provide a different expected value for the number of imported cases for non-residential students 
+        #   (this value) than for residential students (which is provided in the original n_imports parameter). If the value is None,
+        #   then the expected value for the number of imported cases is set via n_imports, and the imported cases are assigned without
+        #   regard to residential status.
+        self.n_importsNonRes = n_importsNonRes 
 
         #Check if the user provided values for any of the layer-centric parameters or to alter prognoses. 
         for key,value in kwargs.items():
@@ -58,7 +64,6 @@ class SimCampus(cvs.Sim):
                 self['quar_factor']  = value
             if key == 'dynam_layer':
                 self['dynam_layer']  = value
-
 
         if debug:
             self.watcher = open("watcher.csv",'w')

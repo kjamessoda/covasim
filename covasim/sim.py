@@ -16,6 +16,7 @@ from . import plotting as cvplt
 from . import interventions as cvi
 from . import analysis as cva
 
+
 # Everything in this file is contained in the Sim class
 __all__ = ['Sim']
 
@@ -453,10 +454,23 @@ class Sim(cvb.BaseSim):
         icu_max  = people.count('critical') > self['n_beds_icu']  if self['n_beds_icu']  else False # Check for ICU bed constraint
 
         # Randomly infect some people (imported infections)
-        n_imports = cvu.poisson(self['n_imports']) # Imported cases
-        if n_imports>0:
-            importation_inds = cvu.choose(max_n=len(people), n=n_imports)
-            people.infect(inds=importation_inds, hosp_max=hosp_max, icu_max=icu_max, layer='importation')
+        if str(type(self)) == "<class 'covasim.simCampus.SimCampus'>" and self.n_importsNonRes: #There has to be a better way to do this, but I am not sure what it is...
+            n_imports = cvu.poisson(self['n_imports']) # Imported cases for residential students
+            if n_imports>0:
+                importation_inds = cvu.choose(max_n = self.dorm_offsets[-1], n=n_imports)
+                people.infect(inds=importation_inds, hosp_max=hosp_max, icu_max=icu_max, layer='importation')
+
+            n_imports = cvu.poisson(self.n_importsNonRes) # Imported cases for non-residential students
+            if self.watcher:
+                self.watcher.write("Non-Resident Import," + str(n_imports) + '\n')
+            if n_imports>0:
+                importation_inds = cvu.choose(max_n = len(people) - self.dorm_offsets[-1], n=n_imports) + self.dorm_offsets[-1]
+                people.infect(inds=importation_inds, hosp_max=hosp_max, icu_max=icu_max, layer='importation')
+        else:
+            n_imports = cvu.poisson(self['n_imports']) # Imported cases
+            if n_imports>0:
+                importation_inds = cvu.choose(max_n=len(people), n=n_imports)
+                people.infect(inds=importation_inds, hosp_max=hosp_max, icu_max=icu_max, layer='importation')
 
         # Apply interventions
         for intervention in self['interventions']:

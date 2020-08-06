@@ -97,7 +97,10 @@ def make_dorm_contacts(sim,layers):
 
     dormIndex = 0
     currentDorm = sim.dorms[dormIndex]
-    for i in range(len(contacts_list)):
+
+    i = 0
+    #Form contact networks for residential students 
+    while i < sim.dorm_offsets[-1]:
         if i >= sim.dorm_offsets[dormIndex + 1]:
             dormIndex += 1
             currentDorm = sim.dorms[dormIndex]
@@ -120,8 +123,18 @@ def make_dorm_contacts(sim,layers):
 
         if 'c' in layers:
             contacts_list[i]['c'] = create_community_contacts(sim,i,communityContacts[i])
+        i += 1
+
+
+    #Form contact networks for non-residential students
+    while i < len(contacts_list):
+        #Non-residential students can only have community contacts b/c they have no dorm assignments
+        if 'c' in layers:
+            contacts_list[i]['c'] = create_community_contacts(sim,i,communityContacts[i])
+        i += 1
 
     return(contacts_list)
+
 
 def create_community_contacts(sim,individual,nContacts):
     '''
