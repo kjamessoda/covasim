@@ -141,3 +141,26 @@ def create_community_contacts(sim,individual,nContacts):
     Select community contacts for an individual. Right now, this is just a placeholder. It will in time incorporate demographic info about the agent.
     '''
     return cvu.choose_r(sim['pop_size'],nContacts)
+
+
+def create_mutual_contacts(sim,contactArray,layer = 'c'):
+    '''
+    When provided with a numpy.array of agent IDs, create contacts between every agent in the list in the provided layer
+    '''
+    #Check that inputs make sense
+    if (contactArray < 0).any() or (contactArray >= sim['pop_size']).any():
+        raise ValueError("One or more agent IDs is invalid")
+
+    if not layer in sim['beta_layer'].keys():
+        raise ValueError("There is no " + layer + " layer listed for this simulation.")
+
+    pop_size = sim['pop_size'] #For convenience
+    contact_list = [{layer:[]} for p in range(pop_size)] # Pre-populate
+
+    i = 1
+    while i < len(contactArray):
+        contact_list[contactArray[(i-1)]][layer] = contactArray[i:]
+        i += 1
+
+    return(contact_list)
+

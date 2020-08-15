@@ -3,6 +3,7 @@ These are additional interventions and helper functions that are useful for SimC
 '''
 
 import covasim.interventions as cvi
+import covasim.populationCampus as cvpc
 import covasim.utils as cvu
 import numpy as np
 import sciris as sc
@@ -66,6 +67,20 @@ class RandomTestingPools:
         return self.pools
 
 
+class RandomNonResidentSample:
+    def __init__(self,samplingRate,lock = False):
+        self.samplingRate = samplingRate
+        self.lock         = lock
+        #This slot will allow the same individuals to be sampled every time a sample is requested (if lock = True)
+        self.sample       = np.array([])
+
+    def create(self,sim):
+        if not (self.lock and len(self.sample) > 0):
+            nonResPop  = sim['pop_size'] - sim.dorm_offsets[-1]
+            self.sample   = np.random.choice(np.arange(sim.dorm_offsets[-1],sim['pop_size']),int(round(nonResPop * self.samplingRate)),replace = False)
+        return self.sample
+
+
 class FloorTargetedPools:
     '''
     Generate a sampling scheme in which a (roughly) set proportion of agents associated with a floor in a Dorm object are 
@@ -125,10 +140,9 @@ class FloorTargetedPools:
                         resample = True
                         targetedAgents = cvu.true(dorm['r'] == room)
                         while resample:
-                            #TODO: Find a way to make this work
                             if len(targetedAgents) == 0:
                                 #uniqueRooms doubles as a collection of rooms that could be sampled. If we know that 
-                                #no agent associated with a room does not fit the desired criteria, the room is removed.
+                                #no agent associated with a room fits the desired criteria, the room is removed.
                                 uniqueRooms -= set([room])
                                 #If there are no more rooms that fit the desired criterion, quit searching. 
                                 if len(uniqueRooms) == 0:
@@ -164,6 +178,83 @@ class FloorTargetedPools:
 
 
 #These are Intervention classes meant to be used in conjunction with 
+class SuperShedderEvent(cvi.Intervention):
+    '''
+    This intervention adds contacts to the community layer beyond what was initially sampled. The intent is to simulate super shedder event.
+
+    Args:
+    eventSize      (int) or (dict): If an int, the number of individuals that should be incorporated into each contact event. If a dict, each 
+                                    key-value pair should correspond to one argument in utils.sample; in other words, the dict should specify
+                                    the distribution from which to pull sizes. 
+    eventFrequency (int) or (list): If an int, the number of events on each day between start_day and end_day (see below). If a list, every 
+                                    element should be the rate parameter for a Poisson distribution. The number events in one day will be pulled
+                                    from the distribution. There should be seven elements, one for each day of the week, starting with the day the
+                                    simulation begins. For example, if the simulation begins on a Monday,the first element provides the expected 
+                                    number of events on a Monday. 
+    start_day                (int): When to start the intervention
+    end_day                  (int): When to end the intervention
+    kwargs                  (dict): passed to Intervention()
+
+    **Examples**::
+
+    '''
+    def __init__(self, eventSize, eventFrequency,start_day=0, end_day=None, **kwargs):
+        super().__init__(**kwargs)
+        self._store_args()
+        self.eventSize      = eventSize
+        self.eventFrequency = eventFrequency
+        self.start_day      = start_day
+        self.end_day        = end_day
+        return
+
+
+    def initialize(self,sim):
+        '''This is borrowed from interventions.test_prob'''
+        #Make sure that the eventFrequency member meets requirements
+        self.start_day = sim.day(self.start_day)
+        self.end_day   = sim.day(self.end_day)
+        self.days      = [self.start_day, self.end_day]
+        self.initialized = True
+        return
+
+    def apply(self, sim):
+        '''Some of this code is also borrowed from interventions.test_prob'''
+        t = sim.t
+        if t < self.start_day:
+            return
+        elif self.end_day is not None and t > self.end_day:
+            return
+
+        #Get the number of events that will occur today
+        if isinstance(self.eventFrequency,int):
+            numberOfEvents = self.eventFrequency
+        else:
+            currentRate    = self.eventFrequency[t%len(self.eventFrequency)]
+            numberOfEvents = cvu.n_poisson(currentRate, 1)[0]
+
+        #Draw the number of individuals to incorporate into the supershedder event
+        for i in range(numberOfEvents):
+            if isinstance(self.eventSize,int):
+                currentSize = self.eventSize
+            elif isinstance(self.eventSize,dict):
+                currentSize = cvu.sample(**self.eventSize)
+
+            #This is necessary if the user requests a Poisson distribution for the size of the event
+            if isinstance(currentSize,np.ndarray):
+                currentSize = currentSize[0]
+
+            #Select the individuals to include in the event
+            agentsInEvent = cvu.choose_r(sim['pop_size'],currentSize)
+            print(agentsInEvent)
+
+            #Add the sampled individuals into the network
+            newContacts = cvpc.create_mutual_contacts(sim,agentsInEvent,layer = 'c')
+            sim.people.add_contacts(newContacts)
+
+        return 
+
+
+
 class symptomQuarantine(cvi.Intervention):
     '''
     Identify individuals who have COVID-like symptoms, place them in quarantine, and test them for COVID. This 
