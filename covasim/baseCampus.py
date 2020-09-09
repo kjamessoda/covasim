@@ -11,12 +11,15 @@ class Dorm(cvb.FlexDict):
     The Dorm class is a relatively simple class for recording the spatial structure in one residence hall.
 
     Args:
-        room     (int)  : number of residents in each room of the residence hall
-        bathroom (int[]): number of rooms that share a bathroom on each floor of the residence hall
-        floor    (int[]): number of bathrooms on each floor of the residence hall
+        room        (int)  : number of residents in each room of the residence hall
+        bathroom    (int[]): number of rooms that share a bathroom on each floor of the residence hall
+        floor       (int[]): number of bathrooms on each floor of the residence hall
+        dormType (str[]): allows the user to place tag(s) on the dorm object that Intervention classes can then interpret.
+                             For example, interventionsCampus.FloorTargetedPools can use a "communal" or "suite" flag (referring
+                             to the type of bathroom that the dorm has) to determine how to sample agents.
     '''
 
-    def __init__(self,room,bathroom,floor):
+    def __init__(self,room,bathroom,floor,dormType = []):
         if len(bathroom) != len(floor):
             raise RuntimeError("Dorm objects must have bathroom and floor arguments of equal length.")
 
@@ -31,6 +34,16 @@ class Dorm(cvb.FlexDict):
         self['b'] = bathroomValue
 
         self['f'] = np.concatenate([[i] * floor[i] * bathroom[i] * room for i in range(len(floor))])
+
+        if isinstance(dormType,list):
+            for tag in dormType:
+                if not isinstance(dormType,str):
+                    raise ValueError("Every element in dormType must be a str value")
+            self.dormType = dormType
+        elif isinstance(dormType,str):
+            self.dormType = [dormType]
+        else:
+            raise ValueError("The dormType argument must be either a str or a list of str values.")
 
     def validate(self):
         '''This function will verify that the Dorm object has a nested structure'''
@@ -80,6 +93,10 @@ class FlexDorm(Dorm):
                                 Outer List : Elements corresponds to a floor
                                 Inner List : Elements specify the number of each type of bathroom on that floor, as specified in the middle
                                              layer of bathrooms
+        dormType (str[]): allows the user to place tag(s) on the dorm object that Intervention classes can then interpret.
+                             For example, interventionsCampus.FloorTargetedPools can use a "communal" or "suite" flag (referring
+                             to the type of bathroom that the dorm has) to determine how to sample agents.
+
     **Example**::
     FlexDorm([[[1,2],[2,3]],[[2,3],[3,3],[3,4]]],[[5,4],[3,2,1]])
 
@@ -88,7 +105,7 @@ class FlexDorm(Dorm):
     floor has three bathrooms where each is shared with a double and a triple, two bathrooms where each is shared by two triples, and one bathroom
     shared between a triple and a quadruple.
     '''
-    def __init__(self,bathroom,floor):
+    def __init__(self,bathroom,floor,dormType = []):
         #Make sure the specification makes sense
         if len(bathroom) != len(floor):
             raise RuntimeError("The bathroom and floor arguments specify different numbers of floors.")
@@ -117,6 +134,18 @@ class FlexDorm(Dorm):
                     bathroomCounter += 1
             self['f'] = np.append(self['f'],[floorCounter] * np.inner([sum(i) for i in bathroom[f]],floor[f]))
             floorCounter += 1
+
+
+        if isinstance(dormType,list):
+            for tag in dormType:
+                if not isinstance(dormType,str):
+                    raise ValueError("Every element in dormType must be a str value")
+            self.dormType = dormType
+        elif isinstance(dormType,str):
+            self.dormType = [dormType]
+        else:
+            raise ValueError("The dormType argument must be either a str or a list of str values.")
+
 #TODO: Create a testing scenario
 
     def validateFlexDorm(self,bathroom,floor):
@@ -156,7 +185,7 @@ class FlexDorm(Dorm):
                 raise RuntimeError("At least one room in the FlexDorm object has an incorrect number of agents")
 
 
-def autoCreateDorms(nDorms,room,bathroom,floor,dormName = "dorm"):
+def autoCreateDorms(nDorms,room,bathroom,floor,dormName = "dorm",dormType = []):
     '''
     Auto-Generate a dict of Dorm objects with identical room-bathroom-floor structures. 
 
@@ -174,5 +203,5 @@ def autoCreateDorms(nDorms,room,bathroom,floor,dormName = "dorm"):
     returnDict = {}
 
     for i in range(nDorms):
-        returnDict[dormName + '_' + str(i)] = Dorm(room,bathroom,floor) 
+        returnDict[dormName + '_' + str(i)] = Dorm(room,bathroom,floor,dormType) 
     return returnDict

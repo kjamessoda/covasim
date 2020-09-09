@@ -128,32 +128,52 @@ class FloorTargetedPools:
                         else:
                             continue
                     newPool       = np.array([-1] * samplesToTake)
-                    uniqueRooms   = set(dorm['r'][dorm['f'] == i])
+                    if "suite" in dorm.dormType:
+                        uniqueRooms   = set(dorm['b'][dorm['f'] == i])
+                    else:
+                        uniqueRooms   = set(dorm['r'][dorm['f'] == i])
+
                     if samplesToTake < len(uniqueRooms):
                         sampledRooms = random.sample(uniqueRooms,samplesToTake)
                     else:
-                        sampledRooms  = list(uniqueRooms)
-                        sampledRooms += random.sample(uniqueRooms,samplesToTake - len(uniqueRooms))
+                        j = 1
+                        while len(uniqueRooms) < samplesToTake - len(uniqueRooms) * j:
+                            j += 1
+                        sampledRooms  = list(uniqueRooms) * j
+                        sampledRooms += random.sample(uniqueRooms,samplesToTake - len(uniqueRooms)*j)
 
                     poolCounter = 0
                     for room in sampledRooms:
                         resample = True
-                        targetedAgents = cvu.true(dorm['r'] == room)
+                        if "suite" in dorm.dormType:
+                            targetedAgents = np.array(list(set(cvu.true(dorm['b'] == room)) - set(newPool)))
+                        else:
+                            targetedAgents = np.array(list(set(cvu.true(dorm['r'] == room)) - set(newPool)))
+                        breakOuter = False
                         while resample:
-                            if len(targetedAgents) == 0:
+                            while len(targetedAgents) == 0:
                                 #uniqueRooms doubles as a collection of rooms that could be sampled. If we know that 
                                 #no agent associated with a room fits the desired criteria, the room is removed.
                                 uniqueRooms -= set([room])
                                 #If there are no more rooms that fit the desired criterion, quit searching. 
                                 if len(uniqueRooms) == 0:
+                                    breakOuter = True
                                     candidate = -1
                                     break
+
                                 if len(uniqueRooms) > len(sampledRooms):
                                     possibleRooms = uniqueRooms - set(sampledRooms) 
                                     room = random.sample(possibleRooms,1)[0]
                                 else:
                                     room = random.sample(uniqueRooms,1)[0]
-                                targetedAgents = cvu.true(dorm['r'] == room)
+
+                                if "suite" in dorm.dormType:
+                                    targetedAgents = np.array(list(set(cvu.true(dorm['b'] == room)) - set(newPool)))
+                                else:
+                                    targetedAgents = np.array(list(set(cvu.true(dorm['r'] == room)) - set(newPool)))
+
+                            if breakOuter:
+                                break
 
                             candidate = np.random.choice(targetedAgents)
                             resample = False
@@ -494,6 +514,7 @@ class TestScheduler(cvi.Intervention):
             #The schedule has a stack-like structure for efficiency.
             if len(self.schedule) == 1:
                 self.schedule = [sim.day(self.schedule)]
+
             else:
                 self.schedule = sim.day(self.schedule)
                 self.schedule.sort(reverse = True)
