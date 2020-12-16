@@ -245,8 +245,9 @@ class BaseSim(ParsObj):
         ''' Ensure that metaparameters get used properly before being updated '''
         pars = sc.mergedicts(pars, kwargs)
         if pars:
-            if pars.get('pop_type'):
-                cvpar.reset_layer_pars(pars, force=False)
+            if pars.get('pop_type') and str(type(self)) != "<class 'covasim.simCampus.SimCampus'>": 
+                #This call cannot handle the campus simulation type label, so it gets skipped in the SimCampus class
+                cvpar.reset_layer_pars(pars, force=False) 
             if pars.get('prog_by_age'):
                 pars['prognoses'] = cvpar.get_prognoses(by_age=pars['prog_by_age']) # Reset prognoses
             super().update_pars(pars=pars, create=create) # Call update_pars() for ParsObj
