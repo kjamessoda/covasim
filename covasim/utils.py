@@ -8,6 +8,7 @@ import numba  as nb # For faster computations
 import numpy  as np # For numerics
 import random # Used only for resetting the seed
 import scipy.stats as sps # For distributions
+from .settings import options as cvo # To set options
 from . import defaults as cvd # To set default types
 
 
@@ -15,18 +16,12 @@ from . import defaults as cvd # To set default types
 __all__ = []
 
 # Set dtypes -- note, these cannot be changed after import since Numba functions are precompiled
-nbbool = nb.bool_
-if cvd.default_precision == 32:
-    nbint   = nb.int32
-    nbfloat = nb.float32
-elif cvd.default_precision == 64:
-    nbint   = nb.int64
-    nbfloat = nb.float64
-else:
-    raise NotImplementedError
+nbbool  = nb.bool_
+nbint   = cvd.nbint
+nbfloat = cvd.nbfloat
 
 # Specify whether to allow parallel Numba calculation -- about 20% faster, but the random number stream becomes nondeterministic
-parallel = False
+parallel = cvo.numba_parallel
 
 
 #%% The core Covasim functions -- compute the infections
@@ -99,6 +94,25 @@ def compute_infections(beta,     sources,  targets,   layer_betas, rel_trans,  r
     return source_inds, target_inds
 
 
+@nb.njit((nbint[:], nbint[:], nb.int64[:]), cache=True)
+def find_contacts(p1, p2, inds):
+    """
+    Numba for Layer.find_contacts()
+
+    A set is returned here rather than a sorted array so that custom tracing interventions can efficiently
+    add extra people. For a version with sorting by default, see Layer.find_contacts(). Indices must be
+    an int64 array since this is what's returned by true() etc. functions by default.
+    """
+    pairing_partners = set()
+    inds = set(inds)
+    for i in range(len(p1)):
+        if p1[i] in inds:
+            pairing_partners.add(p2[i])
+        if p2[i] in inds:
+            pairing_partners.add(p1[i])
+    return pairing_partners
+
+
 #%% Sampling and seed methods
 
 __all__ += ['sample', 'get_pdf', 'set_seed']
@@ -106,7 +120,17 @@ __all__ += ['sample', 'get_pdf', 'set_seed']
 
 def sample(dist=None, par1=None, par2=None, size=None, **kwargs):
     '''
-    Draw a sample from the distribution specified by the input.
+    Draw a sample from the distribution specified by the input. The available
+    distributions are:
+
+    - 'uniform'       : uniform distribution from low=par1 to high=par2; mean is equal to (par1+par2)/2
+    - 'normal'        : normal distribution with mean=par1 and std=par2
+    - 'lognormal'     : lognormal distribution with mean=par1 and std=par2 (parameters are for the lognormal distribution, *not* the underlying normal distribution)
+    - 'normal_pos'    : right-sided normal distribution (i.e. only positive values), with mean=par1 and std=par2 *of the underlying normal distribution*
+    - 'normal_int'    : normal distribution with mean=par1 and std=par2, returns only integer values
+    - 'lognormal_int' : lognormal distribution with mean=par1 and std=par2, returns only integer values
+    - 'poisson'       : Poisson distribution with rate=par1 (par2 is not used); mean and variance are equal to par1
+    - 'neg_binomial'  : negative binomial distribution with mean=par1 and k=par2; converges to Poisson with k=∞
 
     Args:
         dist (str):   the distribution to sample from
@@ -120,13 +144,21 @@ def sample(dist=None, par1=None, par2=None, size=None, **kwargs):
 
     **Examples**::
 
-        sample() # returns Unif(0,1)
-        sample(dist='normal', par1=3, par2=0.5) # returns Normal(μ=3, σ=0.5)
+        cv.sample() # returns Unif(0,1)
+        cv.sample(dist='normal', par1=3, par2=0.5) # returns Normal(μ=3, σ=0.5)
+        cv.sample(dist='lognormal_int', par1=5, par2=3) # returns a lognormally distributed set of values with mean 5 and std 3
 
     Notes:
         Lognormal distributions are parameterized with reference to the underlying normal distribution (see:
         https://docs.scipy.org/doc/numpy-1.14.0/reference/generated/numpy.random.lognormal.html), but this
-        function assumes the user wants to specify the mean and variance of the lognormal distribution.
+        function assumes the user wants to specify the mean and std of the lognormal distribution.
+
+        Negative binomial distributions are parameterized with reference to the mean and dispersion parameter k
+        (see: https://en.wikipedia.org/wiki/Negative_binomial_distribution). The r parameter of the underlying
+        distribution is then calculated from the desired mean and k. For a small mean (~1), a dispersion parameter
+        of ∞ corresponds to the variance and standard deviation being equal to the mean (i.e., Poisson). For a
+        large mean (e.g. >100), a dispersion parameter of 1 corresponds to the standard deviation being equal to
+        the mean.
     '''
 
     choices = [
@@ -335,17 +367,18 @@ def n_poisson(rate, n):
 
 def n_neg_binomial(rate, dispersion, n, step=1): # Numba not used due to incompatible implementation
     '''
-    An array of negative binomial trials; with dispersion = ∞, converges to Poisson.
+    An array of negative binomial trials. See cv.sample() for more explanation.
 
     Args:
         rate (float): the rate of the process (mean, same as Poisson)
-        dispersion (float): amount of dispersion: 0 = infinite, 1 = std is equal to mean, ∞ = Poisson
+        dispersion (float):  dispersion parameter; lower is more dispersion, i.e. 0 = infinite, ∞ = Poisson
         n (int): number of trials
         step (float): the step size to use if non-integer outputs are desired
 
     **Example**::
 
-        outcomes = cv.n_neg_binomial(100, 1, 20) # 20 negative binomial trials with mean 100 and dispersion equal to mean
+        outcomes = cv.n_neg_binomial(100, 1, 50) # 50 negative binomial trials with mean 100 and dispersion roughly equal to mean (large-mean limit)
+        outcomes = cv.n_neg_binomial(1, 100, 20) # 20 negative binomial trials with mean 1 and dispersion still roughly equal to mean (approximately Poisson)
     '''
     nbn_n = dispersion
     nbn_p = dispersion/(rate/step + dispersion)
@@ -407,6 +440,7 @@ def choose_w(probs, n, unique=True):
     else: # Weights are all zero, choose uniformly
         probs = np.ones(n_choices)/n_choices
     return np.random.choice(n_choices, n_samples, p=probs, replace=not(unique))
+
 
 
 #%% Simple array operations
