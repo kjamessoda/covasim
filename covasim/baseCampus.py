@@ -37,7 +37,7 @@ class Dorm(cvb.FlexDict):
 
         if isinstance(dormType,list):
             for tag in dormType:
-                if not isinstance(dormType,str):
+                if not isinstance(tag,str):
                     raise ValueError("Every element in dormType must be a str value")
             self.dormType = dormType
         elif isinstance(dormType,str):
@@ -138,7 +138,7 @@ class FlexDorm(Dorm):
 
         if isinstance(dormType,list):
             for tag in dormType:
-                if not isinstance(dormType,str):
+                if not isinstance(tag,str):
                     raise ValueError("Every element in dormType must be a str value")
             self.dormType = dormType
         elif isinstance(dormType,str):

@@ -37,6 +37,21 @@ def weekly_testing(sim):
     return indices
 
 
+class generalWeeklyTesting:
+    '''This basic class generalizes the function weekly_testing so that it can run a once weekly intervention starting on a day other than the first'''
+    def __init__(self,firstDay = 0):
+        #the first day (in simulation time) that the function should be run
+        self.firstDay   = firstDay
+
+    def implement(self,sim):
+        if (sim.t - self.firstDay)%7 == 0:
+            indices = []
+        else:
+            indices = [True] * sim['pop_size']
+
+        return indices
+
+
 #These classes provide different schemes for generating pools in pooled sampling and other targeted sampling
 class RandomTestingPools:
     '''
