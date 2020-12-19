@@ -15,7 +15,8 @@ import sciris as sc
 class SimCampus(cvs.Sim):
 
     def __init__(self, pars=None, datafile=None, datacols=None, label=None, simfile=None, popfile=None, load_pop=False, save_pop=False, 
-                    dorms = None, nonResident = 0,n_importsNonRes = None,gradStudents = 0,debug= False, **kwargs):
+                    dorms = None, nonResident = 0,n_importsNonRes = None,gradStudents = 0,gradContactScale = 1.,gradTransmissionScale = 1.,
+                    debug= False, **kwargs):
         super().__init__(pars, datafile, datacols, label, simfile, popfile, load_pop, save_pop,**kwargs)
         #super().__init__(**kwargs)
         self['pop_type'] = 'campus' #This is just bookkeeping right now
@@ -40,9 +41,14 @@ class SimCampus(cvs.Sim):
 
         self.dorm_offsets[-1] = self['pop_size'] #The population size is added as a convenience for later functions
         self['pop_size'] += nonResident    # Add non-residential students to the population
-        self.nonResidentEndIndex = self['pop_size'] #This will record the first id that does not refer to a non-residential undergraduate
+        self.nonResidentEndIndex = self['pop_size'] #This will record the first id that does not refer to a non-residential undergraduate; it also provides the number of undergraduates in the simulation
         self['pop_size'] += gradStudents    # Add graduate students to the population
         self.update_pars(pars, **kwargs)   # We have to update the parameters again in case any of the above overwrote a user provided value
+
+        #Grad students act like non-residential students, but you can scale down (or up) the number of contacts they have on average and probability 
+        #   that they will acquire/spread COVID using these scaling parameters
+        self.gradContactScale = gradContactScale 
+        self.gradTransmissionScale = gradTransmissionScale
 
         self['beta_layer']  = {'r':  1,'b': 1,'f': 1,'c': 1} #Set values for SimCampus-specific features
         self['contacts']    = {'r': -1,'b': 3,'f': 3,'c': 3}
@@ -108,7 +114,6 @@ class SimCampus(cvs.Sim):
         # Actually make the people
         self.people = cvpc.make_students(self, save_pop=save_pop, popfile=popfile, verbose=verbose, **kwargs)
         self.people.initialize() # Fully initialize the people
-
 
         # Create the seed infections
         inds = cvu.choose(self['pop_size'], self['pop_infected'])

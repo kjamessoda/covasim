@@ -93,7 +93,9 @@ def make_dorm_contacts(sim,layers):
     if 'f' in layers: 
         floorContacts     = cvu.n_poisson(sim['contacts']['f'], pop_size)
     if 'c' in layers:
-        communityContacts = cvu.n_poisson(sim['contacts']['c'], pop_size)
+        #This statement was used before the addition of the grad student feature. It is being kept until the end of debugging.
+        #communityContacts = cvu.n_poisson(sim['contacts']['c'], pop_size)
+        communityContacts = np.append(cvu.n_poisson(sim['contacts']['c'], sim.nonResidentEndIndex),cvu.n_poisson(sim.gradContactScale * sim['contacts']['c'], pop_size - sim.nonResidentEndIndex))
 
     dormIndex = 0
     currentDorm = sim.dorms[dormIndex]
@@ -127,11 +129,12 @@ def make_dorm_contacts(sim,layers):
 
 
     #Form contact networks for non-residential students
-    while i < len(contacts_list):
+    while i < pop_size:
         #Non-residential students can only have community contacts b/c they have no dorm assignments
         if 'c' in layers:
             contacts_list[i]['c'] = create_community_contacts(sim,i,communityContacts[i])
         i += 1
+
 
     return(contacts_list)
 

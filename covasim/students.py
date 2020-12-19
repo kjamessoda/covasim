@@ -13,6 +13,17 @@ class Students(cvppl.People):
         self.sim = sim
         return
 
+    def initialize(self):
+        ''' Perform initializations. The Students class overwrites its parent class's implementation so grad students can have scaled sus./trans. '''
+        #NOTE: Most of this code originated in the parent class.
+        self.set_prognoses()
+        if self.sim['pop_size'] > self.sim.nonResidentEndIndex:
+            self.rel_sus[self.sim.nonResidentEndIndex:] *= self.sim.gradTransmissionScale
+            self.rel_trans[self.sim.nonResidentEndIndex:] *= self.sim.gradTransmissionScale 
+        self.validate()
+        self.initialized = True
+        return
+
     def update_contacts(self):
         ''' This function overwrites the parent function so that the dynamic contacts will continue to reference the SimCampus object's dorms array'''
 
@@ -80,5 +91,18 @@ class Students(cvppl.People):
         return positiveSchedule, positivePools
                 
 
+    def quarantine(self, inds):
+        '''
+        NOTE: This is legacy code from covasim 1.0. It is needed for certain Intervention classes in the campus simulation type.
+        Quarantine selected people starting on the current day. If a person is already
+        quarantined, this will extend their quarantine.
 
+        Args:
+            inds (array): indices of who to quarantine, specified by check_quar()
+        '''
+
+        self.quarantined[inds] = True
+        self.date_quarantined[inds] = self.t
+        self.date_end_quarantine[inds] = self.t + self.pars['quar_period']
+        return
 
