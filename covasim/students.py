@@ -43,7 +43,7 @@ class Students(cvppl.People):
             self.contacts[lkey].validate()
 
         if self.sim.watcher:
-            self.sim.watcher.write(str(len(self.contacts)/self.sim['pop_size'])+",")
+            self.sim.watcher.write("Average Contacts,"+str(len(self.contacts)/self.sim['pop_size'])+"\n")
 
         return self.contacts
 

@@ -97,6 +97,13 @@ def make_dorm_contacts(sim,layers):
         #communityContacts = cvu.n_poisson(sim['contacts']['c'], pop_size)
         communityContacts = np.append(cvu.n_poisson(sim['contacts']['c'], sim.nonResidentEndIndex),cvu.n_poisson(sim.gradContactScale * sim['contacts']['c'], pop_size - sim.nonResidentEndIndex))
 
+    if sim.debug and sim.t > 0:
+        #print("\nTime: " + str(sim.t))
+        sim.nonGradDiff += communityContacts[sim.dorm_offsets[-1]:sim.nonResidentEndIndex].sum()
+        #print("Non-Resident Contacts: " + str(communityContacts[sim.dorm_offsets[-1]:sim.nonResidentEndIndex].sum()))
+        sim.nonGradDiff -= communityContacts[sim.nonResidentEndIndex:].sum()
+        #print("Grad Contacts: " + str(communityContacts[sim.nonResidentEndIndex:].sum()) + '\n')
+
     dormIndex = 0
     currentDorm = sim.dorms[dormIndex]
 

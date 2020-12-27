@@ -478,6 +478,8 @@ class Sim(cvb.BaseSim):
         # Randomly infect some people (imported infections)
         if str(type(self)) == "<class 'covasim.simCampus.SimCampus'>" and self.n_importsNonRes: #There has to be a better way to do this, but I am not sure what it is...
             n_imports = cvu.poisson(self['n_imports']) # Imported cases for residential students
+            if self.watcher:
+                self.watcher.write("Resident Import," + str(n_imports) + '\n')
             if n_imports>0:
                 importation_inds = cvu.choose(max_n = self.dorm_offsets[-1], n=n_imports)
                 people.infect(inds=importation_inds, hosp_max=hosp_max, icu_max=icu_max, layer='importation')
@@ -491,7 +493,7 @@ class Sim(cvb.BaseSim):
 
             n_imports = cvu.poisson(self.n_importsNonRes * self.gradContactScale) # Imported cases for graduate students. Notice that their importation rate is scaled based the number of contacts they have.
             if self.watcher:
-                self.watcher.write("Non-Resident Import," + str(n_imports) + '\n')
+                self.watcher.write("Grad Import," + str(n_imports) + '\n')
             if n_imports>0 and len(people) > self.nonResidentEndIndex: #Only create imported cases for grad students if there are in fact grad students
                 importation_inds = cvu.choose(max_n = len(people) - self.nonResidentEndIndex, n=n_imports) + self.nonResidentEndIndex
                 people.infect(inds=importation_inds, hosp_max=hosp_max, icu_max=icu_max, layer='importation')

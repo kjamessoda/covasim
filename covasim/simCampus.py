@@ -16,11 +16,11 @@ class SimCampus(cvs.Sim):
 
     def __init__(self, pars=None, datafile=None, datacols=None, label=None, simfile=None, popfile=None, load_pop=False, save_pop=False, 
                     dorms = None, nonResident = 0,n_importsNonRes = None,gradStudents = 0,gradContactScale = 1.,gradTransmissionScale = 1.,
-                    debug= False, **kwargs):
+                    age_dist = {'dist':'uniform', 'par1':18, 'par2':22},debug= False, **kwargs):
         super().__init__(pars, datafile, datacols, label, simfile, popfile, load_pop, save_pop,**kwargs)
         #super().__init__(**kwargs)
         self['pop_type'] = 'campus' #This is just bookkeeping right now
-        self.age_dist = {'dist':'uniform', 'par1':18, 'par2':22} #This new parameter provides a function for the age distribution of People objects
+        self.age_dist = age_dist #This new parameter provides a function for the age distribution of People objects
         self.debug = debug #This data member communicates whether the simulation is being used for software testing
 
         if dorms:
@@ -76,6 +76,8 @@ class SimCampus(cvs.Sim):
 
         if debug:
             self.watcher = open("watcher.csv",'w')
+            self.watcher.write("Label," + "Data" + '\n')
+            self.nonGradDiff = 0
         else:
             self.watcher = None
 
@@ -250,3 +252,10 @@ class SimCampus(cvs.Sim):
                 raise TypeError("The elements of SimCampus.dorms must be class covasim.baseCampus.Dorm")
 
         return
+
+    def finalize(self, verbose=None, restore_pars=True):
+        ''' This function largely calls the corresponding function in the parent class, but it allows additional debugging steps '''
+        if self.debug:
+            self.watcher.write("DiffContacts_NonResGrad," + str(self.nonGradDiff) + '\n')
+        super().finalize(verbose,restore_pars)
+        self.watcher.close()
