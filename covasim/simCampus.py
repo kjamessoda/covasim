@@ -16,13 +16,27 @@ class SimCampus(cvs.Sim):
 
     def __init__(self, pars=None, datafile=None, datacols=None, label=None, simfile=None, popfile=None, load_pop=False, save_pop=False, 
                     dorms = None, nonResident = 0,n_importsNonRes = None,gradStudents = 0,gradContactScale = 1.,gradTransmissionScale = 1.,
-                    age_dist = {'dist':'uniform', 'par1':18, 'par2':22},initialRecovered = {'nAgents':0,'subpop':'none'},debug= False, **kwargs):
+                    age_dist = {'dist':'uniform', 'par1':18, 'par2':22},initialRecovered = [],debug= False, **kwargs):
         super().__init__(pars, datafile, datacols, label, simfile, popfile, load_pop, save_pop,**kwargs)
         #super().__init__(**kwargs)
         self['pop_type'] = 'campus' #This is just bookkeeping right now
         self.age_dist = age_dist #This new parameter provides a function for the age distribution of People objects
-        self.initialRecovered = initialRecovered
         self.debug = debug #This data member communicates whether the simulation is being used for software testing
+
+        print(type(initialRecovered))
+        if not isinstance(initialRecovered,list):
+            print('A')
+            raise ValueError("The argument initialRecovered needs to be a list of dictionaries.")
+        else:
+            for instruction in initialRecovered:
+                if not isinstance(instruction,dict):
+                    print('B')
+                    raise ValueError("The argument initialRecovered needs to be a list of dictionaries.")
+                currentKeys = instruction.keys()
+                if not ('nAgents' in currentKeys and 'subpop' in currentKeys):
+                    raise ValueError("One of the dict objects in initialRecovered does not contain the necessary keys, \'nAgent\' and \'subpop\'.") 
+        self.initialRecovered = initialRecovered
+
 
         if dorms:
             self.dorms = dorms
@@ -96,8 +110,8 @@ class SimCampus(cvs.Sim):
 
     def initialize(self, reset=False, **kwargs):
         super().initialize(reset, **kwargs)
-        if self.initialRecovered['nAgents'] > 0 :
-            self.set_random_recovered(self.initialRecovered['nAgents'],self.initialRecovered['subpop'])
+        for instruction in self.initialRecovered:
+            self.set_random_recovered(instruction['nAgents'],instruction['subpop'])
 
 
     def init_people(self, save_pop=False, load_pop=False, popfile=None, verbose=None, **kwargs):
@@ -156,7 +170,7 @@ class SimCampus(cvs.Sim):
             raise ValueError("The value provided for subpop is not recognized. Possible values are \'none\', \'res\', \'nonres_ug\', and \'grad\'")
 
         #Select which agents will be sampled
-        pool = pool[~self.people.recovered]
+        pool = pool[~self.people.recovered[pool]]
         sample = np.random.choice(pool,nAgents,replace = False)        
 
         #Make the necessary alterations
