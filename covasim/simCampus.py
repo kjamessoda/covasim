@@ -16,11 +16,12 @@ class SimCampus(cvs.Sim):
 
     def __init__(self, pars=None, datafile=None, datacols=None, label=None, simfile=None, popfile=None, load_pop=False, save_pop=False, 
                     dorms = None, nonResident = 0,n_importsNonRes = None,gradStudents = 0,gradContactScale = 1.,gradTransmissionScale = 1.,
-                    age_dist = {'dist':'uniform', 'par1':18, 'par2':22},debug= False, **kwargs):
+                    age_dist = {'dist':'uniform', 'par1':18, 'par2':22},initialRecovered = {'nAgents':0,'subpop':'none'},debug= False, **kwargs):
         super().__init__(pars, datafile, datacols, label, simfile, popfile, load_pop, save_pop,**kwargs)
         #super().__init__(**kwargs)
         self['pop_type'] = 'campus' #This is just bookkeeping right now
         self.age_dist = age_dist #This new parameter provides a function for the age distribution of People objects
+        self.initialRecovered = initialRecovered
         self.debug = debug #This data member communicates whether the simulation is being used for software testing
 
         if dorms:
@@ -93,6 +94,12 @@ class SimCampus(cvs.Sim):
         return
 
 
+    def initialize(self, reset=False, **kwargs):
+        super().initialize(reset, **kwargs)
+        if self.initialRecovered['nAgents'] > 0 :
+            self.set_random_recovered(self.initialRecovered['nAgents'],self.initialRecovered['subpop'])
+
+
     def init_people(self, save_pop=False, load_pop=False, popfile=None, verbose=None, **kwargs):
         '''
         This is a modification of the superclass function.
@@ -120,6 +127,42 @@ class SimCampus(cvs.Sim):
         # Create the seed infections
         inds = cvu.choose(self['pop_size'], self['pop_infected'])
         self.people.infect(inds=inds, layer='seed_infection')
+        return
+
+
+    def set_random_recovered(self,nAgents,subpop = 'none'):
+        '''
+        This function will change some number of agents' states to recovered. The agents that are switched to
+        recovered are randomly selected, but you can specify that the agents belong to a certain subpopulation.
+
+        Args:
+            nAgents = int; number of agents to switch to the recovered state.
+            subpop  = str; what subpopulation of students should be sampled. The following options are available:
+                none     = (default) any agent can be sampled 
+                res      = only sample residential students
+                nonres_ug = only sample nonresidential undergraduate students
+                grad     = only sample graduate students
+        '''
+        subpop = subpop.lower()
+        if subpop == "none":
+            pool = np.arange(self['pop_size'])
+        elif subpop == "res":
+            pool = np.arange(self.dorm_offsets[-1])
+        elif subpop == "nonres_ug":
+            pool = np.arange(self.dorm_offsets[-1],self.nonResidentEndIndex)
+        elif subpop == "grad":
+            pool = np.arange(self.nonResidentEndIndex,self['pop_size'])
+        else:
+            raise ValueError("The value provided for subpop is not recognized. Possible values are \'none\', \'res\', \'nonres_ug\', and \'grad\'")
+
+        #Select which agents will be sampled
+        pool = pool[~self.people.recovered]
+        sample = np.random.choice(pool,nAgents,replace = False)        
+
+        #Make the necessary alterations
+        self.people.susceptible[sample] = False
+        self.people.recovered[sample] = True
+
         return
 
 
@@ -255,7 +298,7 @@ class SimCampus(cvs.Sim):
 
     def finalize(self, verbose=None, restore_pars=True):
         ''' This function largely calls the corresponding function in the parent class, but it allows additional debugging steps '''
+        super().finalize(verbose,restore_pars)
         if self.debug:
             self.watcher.write("DiffContacts_NonResGrad," + str(self.nonGradDiff) + '\n')
-        super().finalize(verbose,restore_pars)
-        self.watcher.close()
+            self.watcher.close()

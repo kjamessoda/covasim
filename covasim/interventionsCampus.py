@@ -83,16 +83,31 @@ class RandomTestingPools:
 
 
 class RandomNonResidentSample:
-    def __init__(self,samplingRate,lock = False):
+    def __init__(self,samplingRate,subgroup = 'none',lock = False):
         self.samplingRate = samplingRate
         self.lock         = lock
+        #This data member can be used to specify a subgroup of non-resident students. Your options are:
+        #   none = (default) Sample on non-resident students
+        #   ug   = Sample non-residential undergraduate students
+        #   grad = Sample non-residential grad students
+        subgroup = subgroup.lower()
+        if subgroup != 'none' and subgroup != 'ug' and subgroup != 'grad':
+            raise ValueError("The subgroup argument is not a recognized value. Possible values are \'none\',\'ug\', and \'grad\'")
+        self.subgroup = subgroup 
         #This slot will allow the same individuals to be sampled every time a sample is requested (if lock = True)
         self.sample       = np.array([])
 
     def create(self,sim):
         if not (self.lock and len(self.sample) > 0):
-            nonResPop  = sim['pop_size'] - sim.dorm_offsets[-1]
-            self.sample   = np.random.choice(np.arange(sim.dorm_offsets[-1],sim['pop_size']),int(round(nonResPop * self.samplingRate)),replace = False)
+            if self.subgroup == 'none':
+                nonResPop  = sim['pop_size'] - sim.dorm_offsets[-1]
+                self.sample   = np.random.choice(np.arange(sim.dorm_offsets[-1],sim['pop_size']),int(round(nonResPop * self.samplingRate)),replace = False)
+            if self.subgroup == 'ug':
+                nonResPop  = sim.nonResidentEndIndex - sim.dorm_offsets[-1]
+                self.sample   = np.random.choice(np.arange(sim.dorm_offsets[-1],sim.nonResidentEndIndex),int(round(nonResPop * self.samplingRate)),replace = False)
+            else:
+                nonResPop  = sim['pop_size'] - sim.nonResidentEndIndex
+                self.sample   = np.random.choice(np.arange(sim.nonResidentEndIndex,sim['pop_size']),int(round(nonResPop * self.samplingRate)),replace = False)
         return self.sample
 
 

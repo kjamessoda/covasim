@@ -491,7 +491,9 @@ class Sim(cvb.BaseSim):
                 importation_inds = cvu.choose(max_n = self.nonResidentEndIndex - self.dorm_offsets[-1], n=n_imports) + self.dorm_offsets[-1]
                 people.infect(inds=importation_inds, hosp_max=hosp_max, icu_max=icu_max, layer='importation')
 
-            n_imports = cvu.poisson(self.n_importsNonRes * self.gradContactScale) # Imported cases for graduate students. Notice that their importation rate is scaled based the number of contacts they have.
+            # Imported cases for graduate students. Notice that their importation rate is scaled based on the population size for graduate students,
+            #   the number of contacts they have, and the lowered probability of transmission.
+            n_imports = cvu.poisson(self.n_importsNonRes * self.gradContactScale * self.gradTransmissionScale) 
             if self.watcher:
                 self.watcher.write("Grad Import," + str(n_imports) + '\n')
             if n_imports>0 and len(people) > self.nonResidentEndIndex: #Only create imported cases for grad students if there are in fact grad students
