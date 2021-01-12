@@ -111,6 +111,36 @@ class RandomNonResidentSample:
         return self.sample
 
 
+class SampleAll:
+    def __init__(self,subgroup = 'none'):
+        #This data member can be used to specify a subgroup of non-resident students. Your options are:
+        #   none   = (default) Sample all students
+        #   ug     = Sample all residential and non-residential undergraduate students
+        #   resid  = Sample all residential students 
+        #   nonres = Sample all non-residential undergraduate students
+        #   grad   = Sample all non-residential grad students
+        subgroup = subgroup.lower()
+        if subgroup != 'none' and subgroup != 'ug' and subgroup != 'resid' and subgroup != 'nonres' and subgroup != 'grad':
+            raise ValueError("The subgroup argument is not a recognized value. Possible values are \'none\',\'ug\', and \'grad\'")
+        self.subgroup = subgroup 
+        #This slot will allow the same individuals to be sampled every time a sample is requested (if lock = True)
+        self.sample       = np.array([])
+
+    def create(self,sim):
+        if len(self.sample) == 0:
+            if self.subgroup == 'grad':
+                self.sample = np.arange(sim.nonResidentEndIndex,sim['pop_size'])
+            elif self.subgroup == 'ug':
+                self.sample = np.arange(sim.nonResidentEndIndex)
+            elif self.subgroup == 'resid':
+                self.sample = np.arange(sim.dorm_offsets[-1])
+            elif self.subgroup == 'nonres':
+                self.sample = np.arange(sim.dorm_offsets[-1],sim.nonResidentEndIndex)
+            else:
+                self.sample = np.arange(sim['pop_size'])
+        return self.sample
+
+
 class FloorTargetedPools:
     '''
     Generate a sampling scheme in which a (roughly) set proportion of agents associated with a floor in a Dorm object are 
@@ -497,6 +527,7 @@ class TestScheduler(cvi.Intervention):
     schedules for when to implement tests and facilitates detailed targeted testing. However, it focuses on individual testing rather
     than pooled testing. 
 
+
     Args:
         sampleGenerator(numpy.array or function): Either a numpy.array listing the individuals that should be tested according to the
                                                   schedule or a function that returns such an array. If a function, there should be one 
@@ -552,6 +583,8 @@ class TestScheduler(cvi.Intervention):
             tempStorage = [sim.day(self.start_date)]
             if not self.end_date:
                 self.end_date = sim['n_days']
+            else:
+                self.end_date = sim.day(self.end_date)
             while tempStorage[-1] + self.schedule <= self.end_date:
                 tempStorage += [tempStorage[-1] + self.schedule]
             tempStorage.sort(reverse = True)

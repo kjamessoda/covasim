@@ -95,10 +95,13 @@ def make_dorm_contacts(sim,layers):
     if 'c' in layers:
         #This statement was used before the addition of the grad student feature. It is being kept until the end of debugging.
         #communityContacts = cvu.n_poisson(sim['contacts']['c'], pop_size)
-        communityContacts = np.append(cvu.n_poisson(sim['contacts']['c'], sim.nonResidentEndIndex),cvu.n_poisson(sim.gradContactScale * sim['contacts']['c'], pop_size - sim.nonResidentEndIndex))
+        communityContacts = np.concatenate((cvu.n_poisson(sim['contacts']['c'], sim.dorm_offsets[-1]),cvu.n_poisson(sim.nonResContacts, sim.nonResidentEndIndex - sim.dorm_offsets[-1]),cvu.n_poisson(sim.gradContactScale * sim.nonResContacts, pop_size - sim.nonResidentEndIndex)))
 
     if sim.debug and sim.t > 0:
+        sim.nonResContactsCounter += communityContacts[sim.dorm_offsets[-1]:sim.nonResidentEndIndex].sum()
+        #nonResContacts = communityContacts[sim.dorm_offsets[-1]:sim.nonResidentEndIndex].sum()
         #print("\nTime: " + str(sim.t))
+        #print("Total Contacts: " + str(len(communityContacts)))
         sim.nonGradDiff += communityContacts[sim.dorm_offsets[-1]:sim.nonResidentEndIndex].sum()
         #print("Non-Resident Contacts: " + str(communityContacts[sim.dorm_offsets[-1]:sim.nonResidentEndIndex].sum()))
         sim.nonGradDiff -= communityContacts[sim.nonResidentEndIndex:].sum()

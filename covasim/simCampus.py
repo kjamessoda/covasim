@@ -15,7 +15,9 @@ import sciris as sc
 class SimCampus(cvs.Sim):
 
     def __init__(self, pars=None, datafile=None, datacols=None, label=None, simfile=None, popfile=None, load_pop=False, save_pop=False, 
-                    dorms = None, nonResident = 0,n_importsNonRes = None,gradStudents = 0,gradContactScale = 1.,gradTransmissionScale = 1.,
+                    dorms = None, 
+                    nonResident = 0, nonResContacts = None, n_importsNonRes = None,
+                    gradStudents = 0, gradContactScale = 1., gradTransmissionScale = 1.,
                     age_dist = {'dist':'uniform', 'par1':18, 'par2':22},initialRecovered = [],debug= False, **kwargs):
         super().__init__(pars, datafile, datacols, label, simfile, popfile, load_pop, save_pop,**kwargs)
         #super().__init__(**kwargs)
@@ -23,14 +25,11 @@ class SimCampus(cvs.Sim):
         self.age_dist = age_dist #This new parameter provides a function for the age distribution of People objects
         self.debug = debug #This data member communicates whether the simulation is being used for software testing
 
-        print(type(initialRecovered))
         if not isinstance(initialRecovered,list):
-            print('A')
             raise ValueError("The argument initialRecovered needs to be a list of dictionaries.")
         else:
             for instruction in initialRecovered:
                 if not isinstance(instruction,dict):
-                    print('B')
                     raise ValueError("The argument initialRecovered needs to be a list of dictionaries.")
                 currentKeys = instruction.keys()
                 if not ('nAgents' in currentKeys and 'subpop' in currentKeys):
@@ -60,10 +59,6 @@ class SimCampus(cvs.Sim):
         self['pop_size'] += gradStudents    # Add graduate students to the population
         self.update_pars(pars, **kwargs)   # We have to update the parameters again in case any of the above overwrote a user provided value
 
-        #Grad students act like non-residential students, but you can scale down (or up) the number of contacts they have on average and probability 
-        #   that they will acquire/spread COVID using these scaling parameters
-        self.gradContactScale = gradContactScale 
-        self.gradTransmissionScale = gradTransmissionScale
 
         self['beta_layer']  = {'r':  1,'b': 1,'f': 1,'c': 1} #Set values for SimCampus-specific features
         self['contacts']    = {'r': -1,'b': 3,'f': 3,'c': 3}
@@ -89,12 +84,26 @@ class SimCampus(cvs.Sim):
             if key == 'dynam_layer':
                 self['dynam_layer']  = value
 
+        #This parameter sets the average number of contacts that a non-residential (undergraduate) student has, if provided. If not provide, it defaults to the residential rate
+        if nonResContacts:
+            self.nonResContacts = nonResContacts
+        else:
+            self.nonResContacts = self['contacts']['c']
+
+        #Grad students act like non-residential students, but you can scale down (or up) the number of contacts they have on average and probability 
+        #   that they will acquire/spread COVID using these scaling parameters
+        self.gradContactScale = gradContactScale 
+        self.gradTransmissionScale = gradTransmissionScale
+
+
         if debug:
             self.watcher = open("watcher.csv",'w')
             self.watcher.write("Label," + "Data" + '\n')
             self.nonGradDiff = 0
+            self.nonResContactsCounter = 0
         else:
             self.watcher = None
+
 
 
     def step(self):
@@ -204,8 +213,6 @@ class SimCampus(cvs.Sim):
                         keys can be missing so long as the value has the correct length for the default age_cutoff value.  
         '''
         prognoses = self.pars['prognoses']
-        print(prognoses)
-        print(prognoses)
         if 'age_cutoffs' in addedInfo.keys():
              prognoses = addedInfo
         else:
@@ -314,5 +321,6 @@ class SimCampus(cvs.Sim):
         ''' This function largely calls the corresponding function in the parent class, but it allows additional debugging steps '''
         super().finalize(verbose,restore_pars)
         if self.debug:
+            self.watcher.write("TotalNonResContacts," + str(self.nonResContactsCounter) + '\n')
             self.watcher.write("DiffContacts_NonResGrad," + str(self.nonGradDiff) + '\n')
             self.watcher.close()
