@@ -9,10 +9,259 @@ All notable changes to the codebase are documented in this file. Changes that ma
    :depth: 1
 
 
+~~~~~~~~~~~
+Coming soon
+~~~~~~~~~~~
+
+These are the major improvements we are currently working on. If there is a specific bugfix or feature you would like to see, please `create an issue <https://github.com/InstituteforDiseaseModeling/covasim/issues/new/choose>`__.
+
+- Expanded tutorials (health care workers, calibration, exercises, etc.)
+- Multi-region and geographical support
+- Economics and costing analysis
+
 
 ~~~~~~~~~~~~~~~~~~~~~~~
-Latest versions (2.0.x)
+Latest versions (3.0.x)
 ~~~~~~~~~~~~~~~~~~~~~~~
+
+
+Version 3.0.2 (2021-04-26)
+--------------------------
+- Added Novavax as one of the default vaccines.
+- If ``use_waning=True``, people will now become *undiagnosed* when they recover (so they are not incorrectly marked as diagnosed if they become reinfected).
+- Added a new method, ``sim.to_df()``, that exports results to a pandas dataframe.
+- Added ``people.lock()`` and ``people.unlock()`` methods, so you do not need to set ``people._lock`` manually.
+- Added extra parameter checking to ``people.set_pars(pars)``, so ``pop_size`` is guaranteed to be an integer.
+- Flattened ``sim['immunity']`` to no longer have separate axes for susceptible, symptomatic, and severe.
+- Fixed a bug in ``cv.sequence()``, introduced in version 2.1.2, that meant it would only ever trigger the last intervention.
+- Fixed a bug where if subtargeting was used with ``cv.vaccinate()``, it would trigger on every day.
+- Fixed ``msim.compare()`` to be more careful about not converting all results to integers.
+- *Regression information*: If you are using waning, ``sim.people.diagnosed`` no longer refers to everyone who has ever been diagnosed, only those still infectious. You can use ``sim.people.defined('date_diagnosed')`` in place of ``sim.people.true('diagnosed')`` (before these were identical).
+- *GitHub info*: PR `1020 <https://github.com/amath-idm/covasim/pull/1020>`__
+
+
+Version 3.0.1 (2021-04-16)
+--------------------------
+- Immunity and vaccine parameters have been updated.
+- The ``People`` class has been updated to remove parameters that were copied into attributes; thus there is no longer both ``people.pars['pop_size']`` and ``people.pop_size``; only the former. Recommended practice is to use ``len(people)`` to get the number of people.
+- Loaded population files can now be used with more than one strain; arrays will be resized automatically. If there is a mismatch in the number of people, this will *not* be automatically resized.
+- A bug was fixed with the ``rescale`` argument to ``cv.strain()`` not having any effect.
+- Dead people are no longer eligible to be vaccinated.
+- *Regression information*: Any user scripts that call ``sim.people.pop_size`` should be updated to call ``len(sim.people)`` (preferred), or ``sim.n``, ``sim['pop_size']``, or ``sim.people.pars['pop_size']``.
+- *GitHub info*: PR `999 <https://github.com/amath-idm/covasim/pull/999>`__
+
+
+Version 3.0.0 (2021-04-13)
+--------------------------
+This version introduces fully featured vaccines, variants, and immunity. **Note:** These new features are still under development; please use with caution and email us at covasim@idmod.org if you have any questions or issues. We expect there to be several more releases over the next few weeks as we refine these new features.
+
+Highlights
+^^^^^^^^^^
+- **Model structure**: The model now follows an "SEIS"-type structure, instead of the previous "SEIR" structure. This means that after recovering from an infection, agents return to the "susceptible" compartment. Each agent in the simulation has properties ``sus_imm``, ``trans_imm`` and ``prog_imm``, which respectively determine their immunity to acquiring an infection, transmitting an infection, or developing a more severe case of COVID-19. All these immunity levels are initially zero. They can be boosted by either natural infection or vaccination, and thereafter they can wane over time or remain permanently elevated. 
+- **Multi-strain modeling**: Model functionality has been extended to allow for modeling of multiple different co-circulating strains with different properties. This means you can now do e.g. ``b117 = cv.strain('b117', days=1, n_imports=20)`` followed by ``sim = cv.Sim(strains=b117)`` to import strain B117. Further examples are contained in ``tests/test_immunity.py`` and in Tutorial 8.
+- **New methods for vaccine modeling**: A new ``cv.vaccinate()`` intervention has been added, which allows more flexible modeling of vaccinations. Vaccines, like natural infections, are assumed to boost agents' immunity.
+- **Consistency**: By default, results from Covasim 3.0.0 should exactly match Covasim 2.1.2. To use the new features, you will need to manually specify ``cv.Sim(use_waning=True)``.
+- **Still TLDR?** Here's a quick showcase of the new features:
+
+.. code-block:: python
+
+    import covasim as cv
+
+    pars = dict(
+        use_waning    = True,  # Use the new immunity features
+        n_days        = 180,   # Set the days, as before
+        n_agents      = 50e3,  # New alias for pop_size
+        scaled_pop    = 200e3, # New alternative to specifying pop_scale
+        strains       = cv.strain('b117', days=20, n_imports=20), # Introduce B117
+        interventions = cv.vaccinate('astrazeneca', days=80), # Create a vaccine
+    )
+
+    cv.Sim(pars).run().plot('strain') # Create, run, and plot strain results
+
+Immunity-related parameter changes
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+- A new control parameter, ``use_waning``, has been added that controls whether to use new waning immunity dynamics ("SEIS" structure) or the old dynamics where post-infection immunity was perfect and did not wane ("SEIR" structure). By default, ``use_waning=False``.
+- A subset of existing parameters have been made strain-specific, meaning that they are allowed to differ by strain. These include: ``rel_beta``, which specifies the relative transmissibility of a new strain compared to the wild strain; ``rel_symp_prob``, ``rel_severe_prob``, ``rel_crit_prob``, and the newly-added immunity parameters ``rel_imm`` (see next point). The list of parameters that can vary by strain is specified in ``defaults.py``. 
+- The parameter ``n_strains`` is an integer that specifies how many strains will be in circulation at some point during the course of the simulation. 
+- Seven new parameters have been added to characterize agents' immunity levels:
+   - The parameter ``nab_init`` specifies a distribution for the level of neutralizing antibodies that agents have following an infection. These values are on log2 scale, and by default they follow a normal distribution.
+   - The parameter ``nab_decay`` is a dictionary specifying the kinetics of decay for neutralizing antibodies over time.
+   - The parameter ``nab_kin``  is constructed during sim initialization, and contains pre-computed evaluations of the nab decay functions described above over time. 
+   - The parameter ``nab_boost`` is a multiplicative factor applied to a person's nab levels if they get reinfected.
+   - The parameter ``cross_immunity``. By default, infection with one strain of SARS-CoV-2 is assumed to grant 50% immunity to infection with a different strain. This default assumption of 50% cross-immunity can be modified via this parameter (which will then apply to all strains in the simulation), or it can be modified on a per-strain basis using the ``immunity`` parameter described below.
+   - The parameter ``immunity`` is a matrix of size ``total_strains`` by ``total_strains``. Row ``i`` specifies the immunity levels that people who have been infected with strain ``i`` have to other strains.
+   - The parameter ``rel_imm`` is a dictionary with keys ``asymp``, ``mild`` and ``severe``. These contain scalars specifying the relative immunity levels for someone who had an asymptomatic, mild, or severe infection. By default, values of 0.98, 0.99, and 1.0 are used.
+- The parameter ``strains`` contains information about any circulating strains that have been specified as additional to the default strain. This is initialized as an empty list and then populated by the user. 
+
+Other parameter changes
+^^^^^^^^^^^^^^^^^^^^^^^
+- The parameter ``frac_susceptible`` will initialize the simulation with less than 100% of the population to be susceptible to COVID (to represent, for example, a baseline level of population immunity). Note that this is intended for quick explorations only, since people are selected at random, whereas in reality higher-risk people will typically be infected first and preferentially be immune. This is primarily designed for use with ``use_waning=False``.
+- The parameter ``scaled_pop``, if supplied, can be used in place of ``pop_scale`` or ``pop_size``. For example, if you specify ``cv.Sim(pop_size=100e3, scaled_pop=550e3)``, it will automatically calculate ``pop_scale=5.5``.
+- Aliases have been added for several parameters: ``pop_size`` can also be supplied as ``n_agents``, and ``pop_infected`` can also be supplied as ``init_infected``. This only applies when creating a sim; otherwise, the default names will be used for these parameters.
+
+Changes to states and results
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+- Several new states have been added, such as ``people.naive``, which stores whether or not a person has ever been exposed to COVID before.
+- New results have been added to store information by strain, as well as population immunity levels. In addition to new entries in ``sim.results``, such as ``pop_nabs`` (population level neutralizing antibodies) and ``new_reinfections``, there is a new set of results ``sim.results.strain``: ``cum_infections_by_strain``, ``cum_infectious_by_strain``, ``new_infections_by_strain``, ``new_infectious_by_strain``, ``prevalence_by_strain``, ``incidence_by_strain``. 
+
+New functions, methods and classes
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+- The newly-added file ``immunity.py`` contains functions, methods, and classes related to calculating immunity. This includes the ``strain`` class (which uses lowercase convention like Covasim interventions, which are also technically classes).
+- A new ``cv.vaccinate()`` intervention has been added. Compared to the previous ``vaccine`` intervention (now renamed ``cv.simple_vaccine()``), this new intervention allows vaccination to boost agents' immunity against infection, transmission, and progression.
+- There is a new ``sim.people.make_nonnaive()`` method, as the opposite of ``sim.people.make_naive()``.
+- New functions ``cv.iundefined()`` and ``cv.iundefinedi()`` have been added for completeness.
+- A new function ``cv.demo()`` has been added as a shortcut to ``cv.Sim().run().plot()``.
+- There are now additional shortcut plotting methods, including ``sim.plot('strain')`` and ``sim.plot('all')``.
+
+Renamed functions and methods
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+- ``cv.vaccine()`` is now called ``cv.simple_vaccine()``.
+- ``cv.get_sim_plots()`` is now called ``cv.get_default_plots()``; ``cv.get_scen_plots()`` is now ``cv.get_default_plots(kind='scen')``.
+- ``sim.people.make_susceptible()`` is now called ``sim.people.make_naive()``.
+
+Bugfixes
+^^^^^^^^
+- ``n_imports`` now scales correctly with population scale (previously they were unscaled).
+- ``cv.ifalse()`` and related functions now work correctly with non-boolean arrays (previously they used the ``~`` operator instead of ``np.logical_not()``, which gave incorrect results for int or float arrays).
+- Interventions and analyzers are now deep-copied when supplied to a sim; this means that the same ones can be created and then used in multiple sims. Scenarios also now deep-copy their inputs.
+
+Regression information
+^^^^^^^^^^^^^^^^^^^^^^
+- As noted above, with ``cv.Sim(use_waning=False)`` (the default), results should be the same as Covasim 2.1.2, except for new results keys mentioned above (which will mostly be zeros, since they are only populated with immunity turned on).
+- Scripts using ``cv.vaccine()`` should be updated to use ``cv.simple_vaccine()``.
+- Scripts calling ``sim.people.make_susceptible()`` should now call ``sim.people.make_naive()``.
+- *GitHub info*: PR `927 <https://github.com/amath-idm/covasim/pull/927>`__
+
+
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Versions 2.x (2.0.0 – 2.1.2)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+Version 2.1.2 (2021-03-31)
+--------------------------
+
+- Interventions and analyzers now accept a function as an argument to ``days`` or e.g. ``start_day``. For example, instead of defining ``start_day=30``, you can define a function (with the intervention and the sim object as arguments) that calculates and returns a start day. This allows interventions to be dynamically triggered based on the state of the sim. See [Tutorial 5](https://docs.idmod.org/projects/covasim/en/latest/tutorials/t05.html) for a new section on how to use this feature.
+- Added a ``finalize()`` method to interventions and analyzers, to replace the ``if sim.t == sim.npts-1:`` blocks in ``apply()`` that had been being used to finalize.
+- Changed setup instructions from ``python setup.py develop`` to ``pip install -e .``, and unpinned ``line_profiler``.
+- *Regression information*: If you have any scripts/workflows that have been using ``python setup.py develop``, please update them to ``pip install -e .``. Likewise, ``python setup.py develop`` is now ``pip install -e .[full]``.
+- *GitHub info*: PR `897 <https://github.com/amath-idm/covasim/pull/897>`__
+
+
+Version 2.1.1 (2021-03-29)
+--------------------------
+
+- **Duration updates:** All duration parameters have been updated from the literature. While most are similar to what they were before, there are some differences: in particular, durations of severe and critical disease (either to recovery or death) have increased; for example, duration from symptom onset to death has increased from 15.8±3.8 days to 18.8±7.2 days. 
+- **Performance updates:** The innermost loop of Covasim, ``cv.compute_infections()``, has been refactored to make more efficient use of array indexing. The observed difference will depend on the nature of the simulation (e.g., network type, interventions), but runs may be up to 1.5x faster now.
+- **Graphs:** People, contacts, and contacts layers now have a new method, ``to_graph()``, that will return a ``networkx`` graph (requires ``networkx`` to be installed, of course). For example, ``nx.draw(cv.Sim(pop_size=100).run().people.to_graph())`` will draw all connections between 100 default people. See ``cv.Sim.people.to_graph()`` for full documentation.
+- A bug was fixed with ``cv.TransTree.animate()`` failing in some cases.
+- ``cv.date_formatter()`` now takes ``interval``, ``start``, and ``end`` arguments.
+- Temporarily pinned ``line_profiler`` to version 3.1 due to `this issue <https://github.com/pyutils/line_profiler/issues/49>`__.
+- *Regression information*: Parameters can be restored by using the ``version`` argument when creating a sim. Specifically, the parameters for the following distributions (all lognormal) have been changed as follows::
+
+    exp2inf:  μ =  4.6 →  4.5, σ = 4.8 → 1.5
+    inf2sym:  μ =  1.0 →  1.1, σ = 0.9 → 0.9
+    sev2crit: μ =  3.0 →  1.5, σ = 7.4 → 2.0
+    sev2rec:  μ = 14.0 → 18.1, σ = 2.4 → 6.3
+    crit2rec: μ = 14.0 → 18.1, σ = 2.4 → 6.3
+    crit2die: μ =  6.2 → 10.7, σ = 1.7 → 4.8
+
+- *GitHub info*: PR `887 <https://github.com/amath-idm/covasim/pull/887>`__
+
+
+Version 2.1.0 (2021-03-23)
+--------------------------
+
+Highlights
+^^^^^^^^^^
+- **Updated lognormal distributions**: Lognormal distributions had been inadvertently using the variance instead of the standard deviation as the second parameter, resulting in too small variance. This has been fixed. This has a small but nonzero impact on the results (e.g. with default parameters, the time to peak infections is about 5-10% sooner now).
+- **Expanded plotting features**: You now have much more flexibility with passing arguments to ``sim.plot()`` and other plotting functions, such as to temporarily set global Matplotlib options (such as DPI), modify axis styles and limits, etc. For example, you can now do things like this: ``cv.Sim().run().plot(dpi=150, rotation=30, start_day='2020-03-01', end_day=55, interval=7)``.
+- **Improved analyzers**: Transmission trees can be computed 20 times faster, Fit objects are more forgiving for data problems, and analyzers can now be exported to JSON.
+
+Bugfixes
+^^^^^^^^
+- Previously, the lognormal distributions were unintentionally using the variance of the distribution, instead of the standard deviation, as the second parameter. This makes a small difference to the results (slightly higher transmission due to the increased variance). Old simulations that are loaded will automatically have their parameters updated so they give the same results; however, new simulations will now give slightly different results than they did previously. (Thanks to Ace Thompson for identifying this.)
+- If a results object has low and high values, these are now exported to JSON (and also to Excel).
+- MultiSim and Scenarios ``run.()`` methods now return themselves, as Sim does. This means that just as you can do ``sim.run().plot()``, you can also now do ``msim.run().plot()``.
+
+Plotting and options
+^^^^^^^^^^^^^^^^^^^^
+- Standard plots now accept keyword arguments that will be passed around to all available subfunctions. For example, if you specify ``dpi=150``, Covasim knows that this is a Matplotlib setting and will configure it accordingly; likewise things like ``bottom`` (only for axes), ``frameon`` (only for legends), etc. If you pass an ambiguous keyword (e.g. ``alpha``, which is used for line and scatter plots), it will only be used for the *first* one.
+- There is a new keyword argument, ``date_args``, that will format the x-axis: options include ``dateformat`` (e.g. ``%Y-%m-%d``), ``rotation`` (to avoid label collisions), and ``start_day`` and ``end_day``.
+- Default plotting styles have updated, including less intrusive lines for interventions.
+
+Other changes
+^^^^^^^^^^^^^
+- MultiSims now have ``to_json()`` and ``to_excel()`` methods, which are shortcuts for calling these methods on the base sim.
+- If no label is supplied to an analyzer or intervention, it will use its class name (e.g. the default label for ``cv.change_beta`` is ``'change_beta'``).
+- Analyzers now have a ``to_json()`` method.
+- The ``cv.Fit`` and ``cv.TransTree`` classes now derive from ``Analyzer``, giving them some new methods and attributes.
+- ``cv.sim.compute_fit()`` has a new keyword argument, ``die``, that will print warnings rather than raise exceptions if no matching data is found. Exceptions are now caught and helpful error messages are provided (e.g., if dates don't match).
+- The algorithm for ``cv.TransTree`` has been rewritten, and now runs 20x as fast. The detailed transmission tree, in ``tt.detailed``, is now a pandas dataframe rather than a list of dictionaries. To restore something close to the previous version, use ``tt.detailed.to_dict('records')``.
+- A data file with an integer rather than date "date" index can now be loaded; these will be counted relative to the simulation's start day.
+- ``cv.load()`` has two new keyword arguments, ``update`` and ``verbose``, than are passed to ``cv.migrate()``.
+- ``cv.options`` has new a ``get_default()`` method which returns the value of that parameter when Covasim was first loaded.
+
+Documentation and testing
+^^^^^^^^^^^^^^^^^^^^^^^^^
+- An extra tutorial has been added on "Deployment", covering how to use it with `Dask <https://dask.org/>`__ and for using Covasim with interactive notebooks and websites. 
+- Tutorials 7 and 10 have been updated so they work on Windows machines.
+- Additional unit tests have been written to check the statistical properties of the sampling algorithms.
+
+Regression information
+^^^^^^^^^^^^^^^^^^^^^^
+- To restore previous behavior for a simulation (i.e. using variance instead of standard deviation for lognormal distributions), call ``cv.misc.migrate_lognormal(sim)``. This is done automatically when loading a saved sim from disk. To undo a migration, type ``cv.misc.migrate_lognormal(sim, revert=True)``. What this function does is loop over the duration parameters and replace ``par2`` with its square root. If you have used lognormal distributions elsewhere, you will need to update them manually.
+- Code that was designed to parse transmission trees will likely need to be revised. The object ``tt.detailed`` is now a dataframe; calling ``tt.detailed.to_dict('records')`` will bring it very close to what it used to be, with the exception that for a given row, ``'t'`` and ``'s'`` used to be nested dictionaries, whereas now they are prefixes. For example, whereas before the 45th person's source's "is quarantined" state would have been ``tt.detailed[45]['s']['is_quarantined']``, it is now ``tt.detailed.iloc[45]['src_is_quarantined']``.
+- *GitHub info*: PR `859 <https://github.com/amath-idm/covasim/pull/859>`__
+
+
+Version 2.0.4 (2021-03-19)
+--------------------------
+- Added a new analyzer, ``cv.daily_age_stats()``, which will compute statistics by age for each day of the simulation (compared to ``cv.age_histogram()``, which only looks at particular points in time).
+- Added a new function, ``cv.date_formatter()``, which may be useful in quickly formatting axes using dates.
+- Removed the need for ``self._store_args()`` in interventions; now custom interventions only need to implement ``super().__init__(**kwargs)`` rather than both.
+- Changed how custom interventions print out by default (a short representation rather than the jsonified version used by built-in interventions).
+- Added an ``update()`` method to ``Layer``, to allow greater flexibility for dynamic updating.
+- *GitHub info*: PR `854 <https://github.com/amath-idm/covasim/pull/854>`__
+
+
+Version 2.0.3 (2021-03-11)
+--------------------------
+- Previously, the way a sim was printed (e.g. ``print(sim)``) depended on what the global ``verbose`` parameter was set to (e.g. ``cv.options.set(verbose=0.1)``), which used ``sim.brief()`` if verbosity was 0, or ``sim.disp()`` otherwise. This has been changed to always use the ``sim.brief()`` representation regardless of verbosity. To restore the previous behavior, use ``sim.disp()`` instead of ``print(sim)``.
+- ``sim.run()`` now returns a pointer to the sim object rather than either nothing (the current default) or the ``sim.results`` object. This means you can now do e.g. ``sim.run().plot()`` or ``sim.run().results`` rather than ``sim.run(do_plot=True)`` or ``sim.run(output=True)``.
+- ``sim.get_interventions()`` and ``sim.get_analyzers()`` have been changed to return all interventions/analyzers if no arguments are supplied. Previously, they would return only the last intervention. To restore the previous behavior, call ``sim.get_intervention()`` or ``sim.get_analyzer()`` instead.
+- The ``Fit`` object (and ``cv.compute_gof()``) have been updated to allow a custom goodness-of-fit estimator to be supplied.
+- Two new results have been added, ``n_preinfectious`` and ``n_removed``, corresponding to the E and R compartments of the SEIR model, respectively.
+- A new shortcut plotting option has been introduced, ``sim.plot(to_plot='seir')``.
+- Plotting colors have been revised to have greater contrast.
+- The ``numba_parallel`` option has been updated to include a "safe" option, which parallelizes as much as it can without disrupting the random number stream. For large sims (>100,000 people), this increases performance by about 10%. The previous ``numba_parallel=True`` option now corresponds to ``numba_parallel='full'``, which is about 20% faster but means results are non-reproducible. Note that for sims smaller than 100,000 people, Numba parallelization has almost no effect on performance.
+- A new option has been added, ``numba_cache``, which controls whether or not Numba functions are cached. They are by default to save compilation time, but if you change Numba options (especially ``numba_parallel``), with caching you may also need to delete the ``__pycache__`` folder for changes to take effect.
+- A frozen list of ``pip`` requirements, as well as test requirements, has been added to the ``tests`` folder.
+- The testing suite has been revamped, with defensive code skipped, bringing code coverage to 90%.
+- *Regression information*: Calls to ``sim.run(do_plot=True, **kwargs)`` should be changed to ``sim.run().plot(**kwargs)``. Calls to ``sim.get_interventions()``/``sim.get_analyzers()`` (with no arguments) should be changed to ``sim.get_intervention()``/``sim.get_analyzer()``. Calls to ``results = sim.run(output=True)`` should be replaced with ``results = sim.run().results``.
+- *GitHub info*: PR `788 <https://github.com/amath-idm/covasim/pull/788>`__
+
+
+Version 2.0.2 (2021-02-01)
+--------------------------
+- Added a new option to easily turn on/off interactive plotting: e.g., simply set ``cv.options.set(interactive=False)`` to turn off interactive plotting. This meta-option sets the other options ``show``, ``close``, and ``backend``.
+- Changed the logic of ``do_show``, such that ``do_show=False`` will never show a plot, even if ``cv.options.show`` is ``True``.
+- Added a new method, ``cv.diff_sims()``, that allows the differences in results between two simulations to be quickly calculated.
+- Removed the ``keys`` argument from ``cv.daily_stats()``, since non-default keys are had to validate.
+- Fixed a bug that prevented prognoses parameters from being correctly set to those from an earlier version.
+- Added an R usage example to the ``examples`` folder (matching the one in the FAQ).
+- Added additional tests, increasing test coverage from 72% to 88%.
+- *GitHub info*: PR `779 <https://github.com/amath-idm/covasim/pull/779>`__
+
+
+Version 2.0.1 (2021-01-31)
+--------------------------
+- Pinned ``xlrd`` version to 1.2.0 due to a bug introduced in the ``2.0.1`` version of ``xlrd`` (see `here <https://stackoverflow.com/questions/65250207/pandas-cannot-open-an-excel-xlsx-file>`__ for details).
+- Fixed a bug that prevented a function from being supplied as ``subtarget`` for ``cv.test_prob()``.
+- Fixed a bug that prevented regression parameters (e.g. ``cv.Sim(version='1.7.5')``) from working when Covasim was installed via ``pip``.
+- Fixed typos in docstrings and tutorials.
+- *GitHub info*: PR `775 <https://github.com/amath-idm/covasim/pull/775>`__
 
 
 Version 2.0.0 (2020-12-05)
@@ -99,7 +348,7 @@ Regression information
 
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Versions 1.7.x (1.6.0 – 1.7.6)
+Versions 1.7.x (1.7.0 – 1.7.6)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
@@ -111,9 +360,9 @@ Version 1.7.6 (2020-10-23)
 
 Version 1.7.5 (2020-10-13)
 --------------------------
-- Added extra convenience methods to ``Layer`` objects
-    - ``Layer.members`` returns an array of all people with interactions in the layer
-    - ``__contains__`` is implemented so ``uid in layer`` can be used
+- Added extra convenience methods to ``Layer`` objects:
+   - ``Layer.members`` returns an array of all people with interactions in the layer
+   - ``__contains__`` is implemented so ``uid in layer`` can be used
 - ``cv.sequence.apply()`` passes on the underlying intervention's return value rather than always returning ``None``
 - *GitHub info*: PR `709 <https://github.com/amath-idm/covasim/pull/709>`__
 
@@ -122,14 +371,14 @@ Version 1.7.4 (2020-10-02)
 --------------------------
 - Refactored `cv.contact_tracing()` so that derived classes can extend individual parts of contact tracing without having to re-implement the entire intervention
 - Moved `people.trace` to `contact_tracing` so that the tracing step can be extended via custom interventions
-- *Regression info*: Custom interventions calling `people.trace` should inherit from `cv.contact_tracing` instead and use `contact_tracing.identify_contacts` and `contact_tracing.notify_contacts` to replace `people.trace`. In most cases however, it would be possible to overload one of the contact tracing steps rather than `contact_tracing.apply`, which thus eliminates the need to call `people.trace` entirely.
+- *Regression information*: Custom interventions calling `people.trace` should inherit from `cv.contact_tracing` instead and use `contact_tracing.identify_contacts` and `contact_tracing.notify_contacts` to replace `people.trace`. In most cases however, it would be possible to overload one of the contact tracing steps rather than `contact_tracing.apply`, which thus eliminates the need to call `people.trace` entirely.
 - *GitHub info*: PR `702 <https://github.com/amath-idm/covasim/pull/702>`__
 
 
 Version 1.7.3 (2020-09-30)
 --------------------------
 - Changed ``test_prob.apply()`` and ``test_num.apply()`` to return the indices of people that were tested
-- ``cvm.date(None)`` returns ``None`` instead of an empty list. Both ``cvm.date()`` and ``cvm.day()`` no longer raise errors if the list of inputs includes ``None`` entries
+- ``cvm.date(None)`` returns ``None`` instead of an empty list. Both ``cvm.date()`` and ``cvm.day()`` no longer raise errors if the list of inputs includes ``None`` entries.
 - *GitHub info*: PR `699 <https://github.com/amath-idm/covasim/pull/699>`__
 
 
@@ -150,7 +399,7 @@ Version 1.7.1 (2020-09-23)
 - The transmission tree plot has been corrected to account for people who have left quarantine. The definition of "quarantine end" for the sake of testing (``quar_policy='end'`` for ``cv.test_num()`` and ``cv.test_prob()``) has also been shifted up by a day (since by ``date_end_quarantine``, people are no longer in quarantine by the end of the day, so tests were not being counted as happening in quarantine).
 - Additional validation is done on intervention order to ensure that testing interventions are defined before tracing interventions.
 - Code has been moved between ``sim.py``, ``people.py``, and ``base.py`` to better reflect the division between "the simulation" (the first two files) and "the housekeeping" (the last file).
-- *Regression info*: Scripts that used ``quar_policy='end'`` may now provide stochastically different results. User scripts that explicitly call ``sim.people.not_defined()`` or ``sim.people.quarantine()`` should be updated to call ``sim.people.undefined()`` and ``sim.people.schedule_quarantine()`` instead.
+- *Regression information*: Scripts that used ``quar_policy='end'`` may now provide stochastically different results. User scripts that explicitly call ``sim.people.not_defined()`` or ``sim.people.quarantine()`` should be updated to call ``sim.people.undefined()`` and ``sim.people.schedule_quarantine()`` instead.
 - *GitHub info*: PR `690 <https://github.com/amath-idm/covasim/pull/690>`__
 
 

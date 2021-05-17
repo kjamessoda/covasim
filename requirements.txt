@@ -1,7 +1,8 @@
 numpy
+numba
 pandas
 scipy
-matplotlib
 statsmodels
-numba
+matplotlib
+xlrd==1.2.0
 sciris>=1.0.0

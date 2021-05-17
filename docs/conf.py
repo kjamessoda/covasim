@@ -15,6 +15,7 @@ import os
 import subprocess
 import sys
 import sphinx_rtd_theme
+from datetime import datetime
 import covasim as cv
 
 on_rtd = os.environ.get('READTHEDOCS') == 'True'
@@ -26,7 +27,7 @@ else:
 
 # Rename "covasim package" to "API reference"
 filename = 'modules.rst' # This must match the Makefile
-with open(filename) as f: # Read exitsting file
+with open(filename) as f: # Read existing file
     lines = f.readlines()
 lines[0] = "API reference\n" # Blast away the existing heading and replace with this
 lines[1] = "=============\n" # Ensure the heading is the right length
@@ -49,11 +50,8 @@ extensions = [
     'sphinx.ext.napoleon',
     'sphinx.ext.todo',
     'sphinx.ext.viewcode',  # Add a link to the Python source code for classes, functions etc.
-    'plantweb.directive',
     'nbsphinx',
 ]
-
-plantuml = 'plantweb'
 
 autodoc_default_options = {
     'member-order': 'bysource',
@@ -83,7 +81,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'Covasim'
-copyright = f'2020, Bill & Melinda Gates Foundation. All rights reserved.\nThese docs were built for Covasim version {cv.__version__}.\n'
+copyright = f'1999 - {datetime.today().year}, Bill & Melinda Gates Foundation. All rights reserved.\nThese docs were built for Covasim version {cv.__version__}.\n'
 author = 'Institute for Disease Modeling'
 
 # The version info for the project you're documenting, acts as replacement for
@@ -233,7 +231,7 @@ texinfo_documents = [
 
 # Configure nbsphinx
 nbsphinx_kernel_name = "python"
-nbsphinx_timeout = 60 # Time in seconds; use -1 for no timeout
+nbsphinx_timeout = 90 # Time in seconds; use -1 for no timeout
 nbsphinx_execute_arguments = [
     "--InlineBackend.figure_formats={'svg', 'pdf'}",
     "--InlineBackend.rc=figure.dpi=96",

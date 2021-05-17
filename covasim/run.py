@@ -172,7 +172,7 @@ class MultiSim(cvb.FlexPretty):
         elif combine:
             self.combine()
 
-        return
+        return self
 
 
     def shrink(self, **kwargs):
@@ -240,27 +240,36 @@ class MultiSim(cvb.FlexPretty):
 
         # Perform the statistics
         raw = {}
-        reskeys = reduced_sim.result_keys()
-        for reskey in reskeys:
+        mainkeys = reduced_sim.result_keys('main')
+        strainkeys = reduced_sim.result_keys('strain')
+        for reskey in mainkeys:
             raw[reskey] = np.zeros((reduced_sim.npts, len(self.sims)))
             for s,sim in enumerate(self.sims):
                 vals = sim.results[reskey].values
-                if len(vals) != reduced_sim.npts:
-                    errormsg = f'Cannot reduce sims with inconsistent numbers of days: {reduced_sim.npts} vs. {len(vals)}'
-                    raise ValueError(errormsg)
-                raw[reskey][:,s] = vals
+                raw[reskey][:, s] = vals
+        for reskey in strainkeys:
+            raw[reskey] = np.zeros((reduced_sim['n_strains'], reduced_sim.npts, len(self.sims)))
+            for s,sim in enumerate(self.sims):
+                vals = sim.results['strain'][reskey].values
+                raw[reskey][:, :, s] = vals
 
-        for reskey in reskeys:
-            if use_mean:
-                r_mean = np.mean(raw[reskey], axis=1)
-                r_std = np.std(raw[reskey], axis=1)
-                reduced_sim.results[reskey].values[:] = r_mean
-                reduced_sim.results[reskey].low       = r_mean - bounds*r_std
-                reduced_sim.results[reskey].high      = r_mean + bounds*r_std
+        for reskey in mainkeys + strainkeys:
+            if reskey in mainkeys:
+                axis = 1
+                results = reduced_sim.results
             else:
-                reduced_sim.results[reskey].values[:] = np.quantile(raw[reskey], q=0.5, axis=1)
-                reduced_sim.results[reskey].low       = np.quantile(raw[reskey], q=quantiles['low'],  axis=1)
-                reduced_sim.results[reskey].high      = np.quantile(raw[reskey], q=quantiles['high'], axis=1)
+                axis = 2
+                results = reduced_sim.results['strain']
+            if use_mean:
+                r_mean = np.mean(raw[reskey], axis=axis)
+                r_std = np.std(raw[reskey], axis=axis)
+                results[reskey].values[:] = r_mean
+                results[reskey].low = r_mean - bounds * r_std
+                results[reskey].high = r_mean + bounds * r_std
+            else:
+                results[reskey].values[:] = np.quantile(raw[reskey], q=0.5, axis=axis)
+                results[reskey].low = np.quantile(raw[reskey], q=quantiles['low'], axis=axis)
+                results[reskey].high = np.quantile(raw[reskey], q=quantiles['high'], axis=axis)
 
         # Compute and store final results
         reduced_sim.compute_summary()
@@ -312,12 +321,14 @@ class MultiSim(cvb.FlexPretty):
 
         n_runs = len(self)
         combined_sim = sc.dcp(self.sims[0])
-        combined_sim.parallelized = {'parallelized':True, 'combined':True, 'n_runs':n_runs}  # Store how this was parallelized
-        combined_sim['pop_size'] *= n_runs  # Record the number of people
+        combined_sim.parallelized = dict(parallelized=True, combined=True, n_runs=n_runs)  # Store how this was parallelized
 
         for s,sim in enumerate(self.sims[1:]): # Skip the first one
-            if combined_sim.people:
+            if combined_sim.people: # If the people are there, add them and increment the population size accordingly
                 combined_sim.people += sim.people
+                combined_sim['pop_size'] = combined_sim.people.pars['pop_size']
+            else: # If not, manually update population size
+                combined_sim['pop_size'] += sim['pop_size']  # Record the number of people
             for key in sim.result_keys():
                 vals = sim.results[key].values
                 if len(vals) != combined_sim.npts:
@@ -382,8 +393,9 @@ class MultiSim(cvb.FlexPretty):
             if label in resdict: # Avoid duplicates
                 label += f' ({i})'
             for reskey in sim.result_keys():
-                val = sim.results[reskey].values[day]
-                if reskey not in ['r_eff', 'doubling_time']:
+                res = sim.results[reskey]
+                val = res.values[day]
+                if res.scale: # Results that are scaled by population are ints
                     val = int(val)
                 resdict[label][reskey] = val
 
@@ -413,17 +425,20 @@ class MultiSim(cvb.FlexPretty):
         other options.
 
         Args:
-            to_plot      (list) : list or dict of which results to plot; see cv.get_sim_plots() for structure
+            to_plot      (list) : list or dict of which results to plot; see cv.get_default_plots() for structure
             inds         (list) : if not combined or reduced, the indices of the simulations to plot (if None, plot all)
             plot_sims    (bool) : whether to plot individual sims, even if combine() or reduce() has been used
             color_by_sim (bool) : if True, set colors based on the simulation type; otherwise, color by result type; True implies a scenario-style plotting, False implies sim-style plotting
-            max_sims     (int)  : maximum number of sims to use with color-by-sim; can be overriden by other options
+            max_sims     (int)  : maximum number of sims to use with color-by-sim; can be overridden by other options
             colors       (list) : if supplied, override default colors for color_by_sim
             labels       (list) : if supplied, override default labels for color_by_sim
             alpha_range  (list) : a 2-element list/tuple/array providing the range of alpha values to use to distinguish the lines
             plot_args    (dict) : passed to sim.plot()
             show_args    (dict) : passed to sim.plot()
             kwargs       (dict) : passed to sim.plot()
+
+        Returns:
+            fig: Figure handle
 
         **Examples**::
 
@@ -463,10 +478,8 @@ class MultiSim(cvb.FlexPretty):
 
             # Handle what to plot
             if to_plot is None:
-                if color_by_sim:
-                    to_plot = cvd.get_scen_plots()
-                else:
-                    to_plot = cvd.get_sim_plots()
+                kind = 'scens' if color_by_sim else 'sim'
+                to_plot = cvd.get_default_plots(kind=kind)
 
             # Handle colors
             if colors is None:
@@ -522,7 +535,7 @@ class MultiSim(cvb.FlexPretty):
 
 
     def plot_result(self, key, colors=None, labels=None, *args, **kwargs):
-        ''' Convenience method for plotting -- arguments passed to Sim.plot_result() '''
+        ''' Convenience method for plotting -- arguments passed to sim.plot_result() '''
         if self.which in ['combined', 'reduced']:
             fig = self.base_sim.plot_result(key, *args, **kwargs)
         else:
@@ -544,7 +557,7 @@ class MultiSim(cvb.FlexPretty):
     def plot_compare(self, t=-1, sim_inds=None, log_scale=True, **kwargs):
         '''
         Plot a comparison between sims, using bars to show different values for
-        each result.
+        each result. For an explanation of other available arguments, see Sim.plot().
 
         Args:
             t         (int)  : index of results, passed to compare()
@@ -553,7 +566,7 @@ class MultiSim(cvb.FlexPretty):
             kwargs    (dict) : standard plotting arguments, see Sim.plot() for explanation
 
         Returns:
-            fig (figure): the figure handle
+            fig: Figure handle
         '''
         df = self.compare(t=t, sim_inds=sim_inds, output=True)
         cvplt.plot_compare(df, log_scale=log_scale, **kwargs)
@@ -567,7 +580,7 @@ class MultiSim(cvb.FlexPretty):
         Args:
             filename    (str)  : the name or path of the file to save to; if None, uses default
             keep_people (bool) : whether or not to store the population in the Sim objects (NB, very large)
-            kwargs      (dict) : passed to makefilepath()
+            kwargs      (dict) : passed to ``sc.makefilepath()``
 
         Returns:
             scenfile (str): the validated absolute path to the saved file
@@ -581,7 +594,7 @@ class MultiSim(cvb.FlexPretty):
         msimfile = sc.makefilepath(filename=filename, **kwargs)
         self.filename = filename # Store the actual saved filename
 
-        # Store sims seperately
+        # Store sims separately
         sims = self.sims
         self.sims = None # Remove for now
 
@@ -780,7 +793,8 @@ class MultiSim(cvb.FlexPretty):
         '''
         try:
             labelstr = f'"{self.label}"; ' if self.label else ''
-            string   = f'MultiSim({labelstr}n_sims: {len(self.sims)}; base: {self.base_sim.brief(output=True)})'
+            n_sims = 0 if not self.sims else len(self.sims)
+            string   = f'MultiSim({labelstr}n_sims: {n_sims}; base: {self.base_sim.brief(output=True)})'
         except Exception as E:
             string = sc.objectid(self)
             string += f'Warning, multisim appears to be malformed:\n{str(E)}'
@@ -808,12 +822,22 @@ class MultiSim(cvb.FlexPretty):
             return string
 
 
+    def to_json(self, *args, **kwargs):
+        ''' Shortcut for base_sim.to_json() '''
+        return self.base_sim.to_json(*args, **kwargs)
+
+
+    def to_excel(self, *args, **kwargs):
+        ''' Shortcut for base_sim.to_excel() '''
+        return self.base_sim.to_excel(*args, **kwargs)
+
+
 class Scenarios(cvb.ParsObj):
     '''
     Class for running multiple sets of multiple simulations -- e.g., scenarios.
     Note that most users are recommended to use MultiSim rather than Scenarios,
     as it gives more control over run options. Scenarios should be used primarily
-    for quick invesigations. See the examples folder for example usage.
+    for quick investigations. See the examples folder for example usage.
 
     Args:
         sim       (Sim)  : if supplied, use a pre-created simulation as the basis for the scenarios
@@ -851,21 +875,25 @@ class Scenarios(cvb.ParsObj):
         self.scenarios = scenarios
 
         # Handle metapars
-        self.metapars = sc.mergedicts({}, metapars)
+        self.metapars = sc.dcp(sc.mergedicts(metapars))
         self.update_pars(self.metapars)
 
         # Create the simulation and handle basepars
         if sim is None:
             sim = cvs.Sim()
-        self.base_sim = sim
-        self.basepars = sc.mergedicts({}, basepars)
+        self.base_sim = sc.dcp(sim)
+        self.basepars = sc.dcp(sc.mergedicts(basepars))
         self.base_sim.update_pars(self.basepars)
         self.base_sim.validate_pars()
-        self.base_sim.init_results()
+        if not self.base_sim.initialized:
+            self.base_sim.init_strains()
+            self.base_sim.init_immunity()
+            self.base_sim.init_results()
 
         # Copy quantities from the base sim to the main object
         self.npts = self.base_sim.npts
         self.tvec = self.base_sim.tvec
+        self['verbose'] = self.base_sim['verbose']
 
         # Create the results object; order is: results key, scenario, best/low/high
         self.sims = sc.objdict()
@@ -879,10 +907,10 @@ class Scenarios(cvb.ParsObj):
         return
 
 
-    def result_keys(self):
+    def result_keys(self, which='all'):
         ''' Attempt to retrieve the results keys from the base sim '''
         try:
-            keys = self.base_sim.result_keys()
+            keys = self.base_sim.result_keys(which=which)
         except Exception as E:
             errormsg = f'Could not retrieve result keys since base sim not accessible: {str(E)}'
             raise ValueError(errormsg)
@@ -913,7 +941,8 @@ class Scenarios(cvb.ParsObj):
                 print(string)
             return
 
-        reskeys = self.result_keys() # Shorten since used extensively
+        mainkeys   = self.result_keys('main')
+        strainkeys = self.result_keys('strain')
 
         # Loop over scenarios
         for scenkey,scen in self.scenarios.items():
@@ -926,11 +955,18 @@ class Scenarios(cvb.ParsObj):
                 raise ValueError(errormsg)
 
             # Create and run the simulations
-
             print_heading(f'Multirun for {scenkey}')
             scen_sim = sc.dcp(self.base_sim)
             scen_sim.label = scenkey
-            scen_sim.update_pars(scenpars)
+
+            scen_sim.update_pars(scenpars)  # Update the parameters, if provided
+            scen_sim.validate_pars()
+            if 'strains' in scenpars: # Process strains
+                scen_sim.init_strains()
+                scen_sim.init_immunity(create=True)
+            elif 'imm_pars' in scenpars: # Process immunity
+                scen_sim.init_immunity(create=True) # TODO: refactor
+
             run_args = dict(n_runs=self['n_runs'], noise=self['noise'], noisepar=self['noisepar'], keep_people=keep_people, verbose=verbose)
             if debug:
                 print('Running in debug mode (not parallelized)')
@@ -941,23 +977,28 @@ class Scenarios(cvb.ParsObj):
 
             # Process the simulations
             print_heading(f'Processing {scenkey}')
-
+            ns = scen_sims[0]['n_strains'] # Get number of strains
             scenraw = {}
-            for reskey in reskeys:
+            for reskey in mainkeys:
                 scenraw[reskey] = np.zeros((self.npts, len(scen_sims)))
                 for s,sim in enumerate(scen_sims):
                     scenraw[reskey][:,s] = sim.results[reskey].values
+            for reskey in strainkeys:
+                scenraw[reskey] = np.zeros((ns, self.npts, len(scen_sims)))
+                for s,sim in enumerate(scen_sims):
+                    scenraw[reskey][:,:,s] = sim.results['strain'][reskey].values
 
             scenres = sc.objdict()
             scenres.best = {}
             scenres.low = {}
             scenres.high = {}
-            for reskey in reskeys:
-                scenres.best[reskey] = np.quantile(scenraw[reskey], q=0.5, axis=1) # Changed from median to mean for smoother plots
-                scenres.low[reskey]  = np.quantile(scenraw[reskey], q=self['quantiles']['low'], axis=1)
-                scenres.high[reskey] = np.quantile(scenraw[reskey], q=self['quantiles']['high'], axis=1)
+            for reskey in mainkeys + strainkeys:
+                axis = 1 if reskey in mainkeys else 2
+                scenres.best[reskey] = np.quantile(scenraw[reskey], q=0.5, axis=axis) # Changed from median to mean for smoother plots
+                scenres.low[reskey]  = np.quantile(scenraw[reskey], q=self['quantiles']['low'], axis=axis)
+                scenres.high[reskey] = np.quantile(scenraw[reskey], q=self['quantiles']['high'], axis=axis)
 
-            for reskey in reskeys:
+            for reskey in mainkeys + strainkeys:
                 self.results[reskey][scenkey]['name'] = scenname
                 for blh in ['best', 'low', 'high']:
                     self.results[reskey][scenkey][blh] = scenres[blh][reskey]
@@ -971,7 +1012,7 @@ class Scenarios(cvb.ParsObj):
         # Save details about the run
         self._kept_people = keep_people
 
-        return
+        return self
 
 
     def compare(self, t=None, output=False):
@@ -1000,12 +1041,19 @@ class Scenarios(cvb.ParsObj):
 
         # Compute dataframe
         x = defaultdict(dict)
+        strainkeys = self.result_keys('strain')
         for scenkey in self.scenarios.keys():
             for reskey in self.result_keys():
-                val = self.results[reskey][scenkey].best[day]
-                if reskey not in ['r_eff', 'doubling_time']:
-                    val = int(val)
-                x[scenkey][reskey] = val
+                if reskey in strainkeys:
+                    for strain in range(self.base_sim['n_strains']):
+                        val = self.results[reskey][scenkey].best[strain, day] # Only prints results for infections by first strain
+                        strainkey = reskey + str(strain) # Add strain number to the summary output
+                        x[scenkey][strainkey] = int(val)
+                else:
+                    val = self.results[reskey][scenkey].best[day]
+                    if reskey not in ['r_eff', 'doubling_time']:
+                        val = int(val)
+                    x[scenkey][reskey] = val
         df = pd.DataFrame.from_dict(x).astype(object)
 
         if not output:
@@ -1017,33 +1065,8 @@ class Scenarios(cvb.ParsObj):
 
     def plot(self, *args, **kwargs):
         '''
-        Plot the results of a scenario.
-
-        Args:
-            to_plot      (dict): Dict of results to plot; see get_scen_plots() for structure
-            do_save      (bool): Whether or not to save the figure
-            fig_path     (str):  Path to save the figure
-            fig_args     (dict): Dictionary of kwargs to be passed to pl.figure()
-            plot_args    (dict): Dictionary of kwargs to be passed to pl.plot()
-            scatter_args (dict): Dictionary of kwargs to be passed to pl.scatter()
-            axis_args    (dict): Dictionary of kwargs to be passed to pl.subplots_adjust()
-            fill_args    (dict): Dictionary of kwargs to be passed to pl.fill_between()
-            legend_args  (dict): Dictionary of kwargs to be passed to pl.legend(); if show_legend=False, do not show
-            show_args    (dict): Control which "extras" get shown: uncertainty bounds, data, interventions, ticks, and the legend
-            as_dates     (bool): Whether to plot the x-axis as dates or time points
-            dateformat   (str):  Date string format, e.g. '%B %d'
-            interval     (int):  Interval between tick marks
-            n_cols       (int):  Number of columns of subpanels to use for subplot
-            font_size    (int):  Size of the font
-            font_family  (str):  Font face
-            grid         (bool): Whether or not to plot gridlines
-            commaticks   (bool): Plot y-axis with commas rather than scientific notation
-            setylim      (bool): Reset the y limit to start at 0
-            log_scale    (bool): Whether or not to plot the y-axis with a log scale; if a list, panels to show as log
-            do_show      (bool): Whether or not to show the figure
-            colors       (dict): Custom color for each scenario, must be a dictionary with one entry per scenario key
-            sep_figs     (bool): Whether to show separate figures for different results instead of subplots
-            fig          (fig):  Existing figure to plot into
+        Plot the results of a scenario. For an explanation of available arguments,
+        see Sim.plot().
 
         Returns:
             fig: Figure handle
@@ -1100,7 +1123,7 @@ class Scenarios(cvb.ParsObj):
         spreadsheet = sc.Spreadsheet()
         spreadsheet.freshbytes()
         with pd.ExcelWriter(spreadsheet.bytes, engine='xlsxwriter') as writer:
-            for key in self.result_keys():
+            for key in self.result_keys('main'): # Multidimensional strain keys can't be exported
                 result_df = pd.DataFrame.from_dict(sc.flattendict(self.results[key], sep='_'))
                 result_df.to_excel(writer, sheet_name=key)
         spreadsheet.load()
@@ -1136,7 +1159,7 @@ class Scenarios(cvb.ParsObj):
         scenfile = sc.makefilepath(filename=scenfile, **kwargs)
         self.scenfile = scenfile # Store the actual saved filename
 
-        # Store sims seperately
+        # Store sims separately
         sims = self.sims
         self.sims = None # Remove for now
 
@@ -1247,7 +1270,8 @@ class Scenarios(cvb.ParsObj):
         '''
         try:
             labelstr = f'"{self.label}"; ' if self.label else ''
-            string   = f'Scenarios({labelstr}n_scenarios: {len(self.sims)}; base: {self.base_sim.brief(output=True)})'
+            n_scenarios = 0 if not self.scenarios else len(self.scenarios)
+            string   = f'Scenarios({labelstr}n_scenarios: {n_scenarios}; base: {self.base_sim.brief(output=True)})'
         except Exception as E:
             string = sc.objectid(self)
             string += f'Warning, scenarios appear to be malformed:\n{str(E)}'

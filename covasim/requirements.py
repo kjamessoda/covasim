@@ -16,7 +16,7 @@ def check_sciris():
     ''' Check that Sciris is available and the right version '''
     try:
         import sciris as sc
-    except ModuleNotFoundError:
+    except ModuleNotFoundError: # pragma: no cover
         errormsg = 'Sciris is a required dependency but is not found; please install via "pip install sciris"'
         raise ModuleNotFoundError(errormsg)
     ver = sc.__version__
@@ -32,12 +32,12 @@ def check_synthpops(verbose=False, die=False):
 
     # Check synthpops -- optional dependency
     try:
-        import synthpops # noqa
+        import synthpops
         return synthpops
-    except ImportError as E:
+    except ModuleNotFoundError as E: # pragma: no cover
         import_error = f'Synthpops (for detailed demographic data) is not available ({str(E)})\n'
         if die:
-            raise ImportError(import_error)
+            raise ModuleNotFoundError(import_error)
         elif verbose:
             print(import_error)
         return False

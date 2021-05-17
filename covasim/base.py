@@ -13,7 +13,6 @@ from . import utils as cvu
 from . import misc as cvm
 from . import defaults as cvd
 from . import parameters as cvpar
-from .settings import options as cvo
 
 # Specify all externally visible classes this file defines
 __all__ = ['ParsObj', 'Result', 'BaseSim', 'BasePeople', 'Person', 'FlexDict', 'Contacts', 'Layer']
@@ -23,17 +22,14 @@ __all__ = ['ParsObj', 'Result', 'BaseSim', 'BasePeople', 'Person', 'FlexDict', '
 
 class FlexPretty(sc.prettyobj):
     '''
-    A class that by default changes the display type depending on the current level
-    of verbosity.
+    A class that supports multiple different display options: namely obj.brief()
+    for a one-line description and obj.disp() for a full description.
     '''
 
     def __repr__(self):
-        ''' Set display options based on current level of verbosity '''
+        ''' Use brief repr by default '''
         try:
-            if cvo['verbose']:
-                string = self._disp()
-            else:
-                string = self._brief()
+            string = self._brief()
         except Exception as E:
             string = sc.objectid(self)
             string += f'Warning, something went wrong printing object:\n{str(E)}'
@@ -83,6 +79,7 @@ class ParsObj(FlexPretty):
             errormsg = f'Key "{key}" not found; available keys:\n{all_keys}'
             raise sc.KeyNotFoundError(errormsg)
 
+
     def __setitem__(self, key, value):
         ''' Ditto '''
         if key in self.pars:
@@ -92,8 +89,6 @@ class ParsObj(FlexPretty):
             errormsg = f'Key "{key}" not found; available keys:\n{all_keys}'
             raise sc.KeyNotFoundError(errormsg)
         return
-
-
 
 
     def update_pars(self, pars=None, create=False):
@@ -128,6 +123,7 @@ class Result(object):
         npts (int): if values is None, precreate it to be of this length
         scale (bool): whether or not the value scales by population scale factor
         color (str/arr): default color for plotting (hex or RGB notation)
+        n_strains (int): the number of strains the result is for (0 for results not by strain)
 
     **Example**::
 
@@ -137,15 +133,21 @@ class Result(object):
         print(r1.values)
     '''
 
-    def __init__(self, name=None, npts=None, scale=True, color=None):
+    def __init__(self, name=None, npts=None, scale=True, color=None, n_strains=0):
         self.name =  name  # Name of this result
         self.scale = scale # Whether or not to scale the result by the scale factor
         if color is None:
-            color = '#000000'
+            color = cvd.get_default_colors()['default']
         self.color = color # Default color
         if npts is None:
             npts = 0
-        self.values = np.array(np.zeros(int(npts)), dtype=cvd.result_float)
+        npts = int(npts)
+
+        if n_strains>0:
+            self.values = np.zeros((n_strains, npts), dtype=cvd.result_float)
+        else:
+            self.values = np.zeros(npts, dtype=cvd.result_float)
+
         self.low    = None
         self.high   = None
         return
@@ -234,23 +236,38 @@ class BaseSim(ParsObj):
             string   = f'Sim({labelstr}; {start} to {end}; pop: {pop_size:n} {pop_type}; epi: {results})'
 
         # ...but if anything goes wrong, return the default with a warning
-        except Exception as E:
+        except Exception as E: # pragma: no cover
             string = sc.objectid(self)
-            string += f'Warning, sim appears to be malformed:\n{str(E)}'
+            string += f'Warning, sim appears to be malformed; use sim.disp() for details:\n{str(E)}'
 
         return string
 
 
     def update_pars(self, pars=None, create=False, **kwargs):
         ''' Ensure that metaparameters get used properly before being updated '''
+
+        # Merge everything together
         pars = sc.mergedicts(pars, kwargs)
         if pars:
-            if pars.get('pop_type') and str(type(self)) != "<class 'covasim.simCampus.SimCampus'>": 
+            # Define aliases
+            mapping = dict(
+                n_agents = 'pop_size',
+                init_infected = 'pop_infected',
+            )
+            for key1,key2 in mapping.items():
+                if key1 in pars:
+                    pars[key2] = pars.pop(key1)
+
+            # Handle other special parameters
+            if pars.get('pop_type') and str(type(self)) != "<class 'covasim.simCampus.SimCampus'>":
                 #This call cannot handle the campus simulation type label, so it gets skipped in the SimCampus class
-                cvpar.reset_layer_pars(pars, force=False) 
+                cvpar.reset_layer_pars(pars, force=False)
             if pars.get('prog_by_age'):
-                pars['prognoses'] = cvpar.get_prognoses(by_age=pars['prog_by_age']) # Reset prognoses
-            super().update_pars(pars=pars, create=create) # Call update_pars() for ParsObj
+                pars['prognoses'] = cvpar.get_prognoses(by_age=pars['prog_by_age'], version=self._default_ver) # Reset prognoses
+
+            # Call update_pars() for ParsObj
+            super().update_pars(pars=pars, create=create)
+
         return
 
 
@@ -281,7 +298,7 @@ class BaseSim(ParsObj):
         ''' Count the number of people -- if it fails, assume none '''
         try: # By default, the length of the people dict
             return len(self.people)
-        except: # If it's None or missing
+        except:  # pragma: no cover # If it's None or missing
             return 0
 
     @property
@@ -289,7 +306,7 @@ class BaseSim(ParsObj):
         ''' Get the total population size, i.e. the number of agents times the scale factor -- if it fails, assume none '''
         try:
             return self['pop_size']*self['pop_scale']
-        except: # If it's None or missing
+        except:  # pragma: no cover # If it's None or missing
             return 0
 
     @property
@@ -297,7 +314,7 @@ class BaseSim(ParsObj):
         ''' Count the number of time points '''
         try:
             return int(self['n_days'] + 1)
-        except:
+        except: # pragma: no cover
             return 0
 
     @property
@@ -305,7 +322,7 @@ class BaseSim(ParsObj):
         ''' Create a time vector '''
         try:
             return np.arange(self.npts)
-        except:
+        except: # pragma: no cover
             return np.array([])
 
     @property
@@ -320,7 +337,7 @@ class BaseSim(ParsObj):
         '''
         try:
             return self['start_day'] + self.tvec * dt.timedelta(days=1)
-        except:
+        except: # pragma: no cover
             return np.array([])
 
 
@@ -392,9 +409,23 @@ class BaseSim(ParsObj):
         return dates
 
 
-    def result_keys(self):
-        ''' Get the actual results objects, not other things stored in sim.results '''
-        keys = [key for key in self.results.keys() if isinstance(self.results[key], Result)]
+    def result_keys(self, which='main'):
+        '''
+        Get the actual results objects, not other things stored in sim.results.
+
+        If which is 'main', return only the main results keys. If 'strain', return
+        only strain keys. If 'all', return all keys.
+
+        '''
+        keys = []
+        choices = ['main', 'strain', 'all']
+        if which in ['main', 'all']:
+            keys += [key for key,res in self.results.items() if isinstance(res, Result)]
+        if which in ['strain', 'all'] and 'strain' in self.results:
+            keys += [key for key,res in self.results['strain'].items() if isinstance(res, Result)]
+        if which not in choices: # pragma: no cover
+            errormsg = f'Choice "which" not available; choices are: {sc.strjoin(choices)}'
+            raise ValueError(errormsg)
         return keys
 
 
@@ -422,7 +453,7 @@ class BaseSim(ParsObj):
 
         '''
 
-        if not self.results_ready:
+        if not self.results_ready: # pragma: no cover
             errormsg = 'Please run the sim before exporting the results'
             raise RuntimeError(errormsg)
 
@@ -434,6 +465,10 @@ class BaseSim(ParsObj):
         for key,res in self.results.items():
             if isinstance(res, Result):
                 resdict[key] = res.values
+                if res.low is not None:
+                    resdict[key+'_low'] = res.low
+                if res.high is not None:
+                    resdict[key+'_high'] = res.high
             elif for_json:
                 if key == 'date':
                     resdict[key] = [str(d) for d in res] # Convert dates to strings
@@ -475,7 +510,7 @@ class BaseSim(ParsObj):
 
     def to_json(self, filename=None, keys=None, tostring=False, indent=2, verbose=False, *args, **kwargs):
         '''
-        Export results as JSON.
+        Export results and parameters as JSON.
 
         Args:
             filename (str): if None, return string; else, write to file
@@ -513,7 +548,7 @@ class BaseSim(ParsObj):
                 d['parameters'] = pardict
             elif key == 'summary':
                 d['summary'] = dict(sc.dcp(self.summary))
-            else:
+            else: # pragma: no cover
                 try:
                     d[key] = sc.sanitizejson(getattr(self, key))
                 except Exception as E:
@@ -528,25 +563,46 @@ class BaseSim(ParsObj):
         return output
 
 
-    def to_excel(self, filename=None):
+    def to_df(self, date_index=False):
         '''
-        Export results as XLSX
+        Export results to a pandas dataframe
 
         Args:
-            filename (str): if None, return string; else, write to file
+            date_index  (bool): if True, use the date as the index
+        '''
+        resdict = self.export_results(for_json=False)
+        df = pd.DataFrame.from_dict(resdict)
+        df['date'] = self.datevec
+        new_columns = ['t','date'] + df.columns[1:-1].tolist() # Get column order
+        df = df.reindex(columns=new_columns) # Reorder so 't' and 'date' are first
+        if date_index:
+            df = df.set_index('date')
+        return df
+
+
+    def to_excel(self, filename=None, skip_pars=None):
+        '''
+        Export parameters and results as Excel format
+
+        Args:
+            filename  (str): if None, return string; else, write to file
+            skip_pars (list): if provided, a custom list parameters to exclude
 
         Returns:
             An sc.Spreadsheet with an Excel file, or writes the file to disk
-
         '''
-        resdict = self.export_results(for_json=False)
-        result_df = pd.DataFrame.from_dict(resdict)
-        result_df.index = self.datevec
-        result_df.index.name = 'date'
+        if skip_pars is None:
+            skip_pars = ['strain_map', 'vaccine_map'] # These include non-string keys so fail at sc.flattendict()
 
-        par_df = pd.DataFrame.from_dict(sc.flattendict(self.pars, sep='_'), orient='index', columns=['Value'])
+        # Export results
+        result_df = self.to_df(date_index=True)
+
+        # Export parameters
+        pars = {k:v for k,v in self.pars.items() if k not in skip_pars}
+        par_df = pd.DataFrame.from_dict(sc.flattendict(pars, sep='_'), orient='index', columns=['Value'])
         par_df.index.name = 'Parameter'
 
+        # Convert to spreadsheet
         spreadsheet = sc.Spreadsheet()
         spreadsheet.freshbytes()
         with pd.ExcelWriter(spreadsheet.bytes, engine='xlsxwriter') as writer:
@@ -647,7 +703,7 @@ class BaseSim(ParsObj):
             sim = cv.Sim.load('my-simulation.sim')
         '''
         sim = cvm.load(filename, *args, **kwargs)
-        if not isinstance(sim, BaseSim):
+        if not isinstance(sim, BaseSim): # pragma: no cover
             errormsg = f'Cannot load object of {type(sim)} as a Sim object'
             raise TypeError(errormsg)
         return sim
@@ -657,7 +713,7 @@ class BaseSim(ParsObj):
         ''' Helper method for get_interventions() and get_analyzers(); see get_interventions() docstring '''
 
         # Handle inputs
-        if which not in ['interventions', 'analyzers']:
+        if which not in ['interventions', 'analyzers']: # pragma: no cover
             errormsg = f'This method is only defined for interventions and analyzers, not "{which}"'
             raise ValueError(errormsg)
 
@@ -674,8 +730,10 @@ class BaseSim(ParsObj):
 
         else: # Standard usage case
             position = 0 if first else -1 # Choose either the first or last element
-            if label is None:
-                label = position # Get the last element
+            if label is None: # Get all interventions if no label is supplied, e.g. sim.get_interventions()
+                label = np.arange(n_ia)
+            if isinstance(label, np.ndarray): # Allow arrays to be provided
+                label = label.tolist()
             labels = sc.promotetolist(label)
 
             # Calculate the matches
@@ -694,24 +752,24 @@ class BaseSim(ParsObj):
                         elif isinstance(label, type) and isinstance(ia_obj, label):
                             matches.append(ia_obj)
                             match_inds.append(ind)
-                else:
-                    errormsg = f'Could not interpret label type "{type(label)}": should be str, int, or {which} class'
+                else: # pragma: no cover
+                    errormsg = f'Could not interpret label type "{type(label)}": should be str, int, list, or {which} class'
                     raise TypeError(errormsg)
 
             # Parse the output options
             if as_inds:
                 output = match_inds
-            elif as_list:
+            elif as_list: # Used by get_interventions()
                 output = matches
-            else: # Normal case, return actual interventions
-                if len(matches) == 0:
+            else:
+                if len(matches) == 0: # pragma: no cover
                     if die:
                         errormsg = f'No {which} matching "{label}" were found'
                         raise ValueError(errormsg)
                     else:
                         output = None
                 else:
-                    output = matches[position] # Return either the first or last match
+                    output = matches[position] # Return either the first or last match (usually), used by get_intervention()
 
             return output
 
@@ -796,28 +854,40 @@ class BasePeople(FlexPretty):
             If the key is an integer, alias `people.person()` to return a `Person` instance
         '''
 
-        if isinstance(key, int):
-            return self.person(key)
-
         try:
             return self.__dict__[key]
-        except:
-            errormsg = f'Key "{key}" is not a valid attribute of people'
-            raise AttributeError(errormsg)
+        except: # pragma: no cover
+            if isinstance(key, int):
+                return self.person(key)
+            else:
+                errormsg = f'Key "{key}" is not a valid attribute of people'
+                raise AttributeError(errormsg)
 
 
     def __setitem__(self, key, value):
         ''' Ditto '''
-        if self._lock and key not in self.__dict__:
-            errormsg = f'Key "{key}" is not a valid attribute of people'
+        if self._lock and key not in self.__dict__: # pragma: no cover
+            errormsg = f'Key "{key}" is not a current attribute of people, and the people object is locked; see people.unlock()'
             raise AttributeError(errormsg)
         self.__dict__[key] = value
         return
 
 
+    def lock(self):
+        ''' Lock the people object to prevent keys from being added '''
+        self._lock = True
+        return
+
+
+    def unlock(self):
+        ''' Unlock the people object to allow keys to be added '''
+        self._lock = False
+        return
+
+
     def __len__(self):
         ''' This is just a scalar, but validate() and _resize_arrays() make sure it's right '''
-        return self.pop_size
+        return int(self.pars['pop_size'])
 
 
     def __iter__(self):
@@ -829,17 +899,32 @@ class BasePeople(FlexPretty):
     def __add__(self, people2):
         ''' Combine two people arrays '''
         newpeople = sc.dcp(self)
-        for key in self.keys():
-            newpeople.set(key, np.concatenate([newpeople[key], people2[key]]), die=False) # Allow size mismatch
+        keys = list(self.keys())
+        for key in keys:
+            npval = newpeople[key]
+            p2val = people2[key]
+            if npval.ndim == 1:
+                newpeople.set(key, np.concatenate([npval, p2val], axis=0), die=False) # Allow size mismatch
+            elif npval.ndim == 2:
+                newpeople.set(key, np.concatenate([npval, p2val], axis=1), die=False)
+            else:
+                errormsg = f'Not sure how to combine arrays of {npval.ndim} dimensions for {key}'
+                raise NotImplementedError(errormsg)
 
         # Validate
-        newpeople.pop_size += people2.pop_size
+        newpeople.pars['pop_size'] += people2.pars['pop_size']
         newpeople.validate()
 
         # Reassign UIDs so they're unique
         newpeople.set('uid', np.arange(len(newpeople)))
 
         return newpeople
+
+
+    def __radd__(self, people2):
+        ''' Allows sum() to work correctly '''
+        if not people2: return self
+        else:           return self.__add__(people2)
 
 
     def _brief(self):
@@ -850,7 +935,7 @@ class BasePeople(FlexPretty):
         try:
             layerstr = ', '.join([str(k) for k in self.layer_keys()])
             string   = f'People(n={len(self):0n}; layers: {layerstr})'
-        except Exception as E:
+        except Exception as E: # pragma: no cover
             string = sc.objectid(self)
             string += f'Warning, multisim appears to be malformed:\n{str(E)}'
         return string
@@ -865,7 +950,7 @@ class BasePeople(FlexPretty):
         ''' Ensure sizes and dtypes match '''
         current = self[key]
         value = np.array(value, dtype=self._dtypes[key]) # Ensure it's the right type
-        if die and len(value) != len(current):
+        if die and len(value) != len(current): # pragma: no cover
             errormsg = f'Length of new array does not match current ({len(value)} vs. {len(current)})'
             raise IndexError(errormsg)
         self[key] = value
@@ -907,18 +992,34 @@ class BasePeople(FlexPretty):
         ''' Count the number of people for a given key '''
         return (self[key]>0).sum()
 
+    def count_by_strain(self, key, strain):
+        ''' Count the number of people for a given key '''
+        return (self[key][strain,:]>0).sum()
+
 
     def count_not(self, key):
         ''' Count the number of people who do not have a property for a given key '''
         return (self[key]==0).sum()
 
 
-    def set_pars(self, pars):
+    def set_pars(self, pars=None):
         '''
-        Very simple method to re-link the parameters stored in the people object
-        to the sim containing it: included simply for the sake of being explicit.
+        Re-link the parameters stored in the people object to the sim containing it,
+        and perform some basic validation.
         '''
-        self.pars = pars
+        if pars is None:
+            pars = {}
+        elif sc.isnumber(pars): # Interpret as a population size
+            pars = {'pop_size':pars} # Ensure it's a dictionary
+        orig_pars = self.__dict__.get('pars') # Get the current parameters using dict's get method
+        pars = sc.mergedicts(orig_pars, pars)
+        if 'pop_size' not in pars:
+            errormsg = f'The parameter "pop_size" must be included in a population; keys supplied were:\n{sc.newlinejoin(pars.keys())}'
+            raise sc.KeyNotFoundError(errormsg)
+        pars['pop_size'] = int(pars['pop_size'])
+        pars.setdefault('n_strains', 1)
+        pars.setdefault('location', None)
+        self.pars = pars # Actually store the pars
         return
 
 
@@ -954,7 +1055,7 @@ class BasePeople(FlexPretty):
         except: # If not fully initialized
             try:
                 keys = list(self.pars['beta_layer'].keys())
-            except: # If not even partially initialized
+            except:  # pragma: no cover # If not even partially initialized
                 keys = []
         return keys
 
@@ -975,9 +1076,17 @@ class BasePeople(FlexPretty):
 
         # Check that the length of each array is consistent
         expected_len = len(self)
+        expected_strains = self.pars['n_strains']
         for key in self.keys():
-            actual_len = len(self[key])
-            if actual_len != expected_len:
+            if self[key].ndim == 1:
+                actual_len = len(self[key])
+            else: # If it's 2D, strains need to be checked separately
+                actual_strains, actual_len = self[key].shape
+                if actual_strains != expected_strains:
+                    if verbose:
+                        print(f'Resizing "{key}" from {actual_strains} to {expected_strains}')
+                    self._resize_arrays(keys=key, new_size=(expected_strains, expected_len))
+            if actual_len != expected_len: # pragma: no cover
                 if die:
                     errormsg = f'Length of key "{key}" did not match population size ({actual_len} vs. {expected_len})'
                     raise IndexError(errormsg)
@@ -993,16 +1102,22 @@ class BasePeople(FlexPretty):
         return
 
 
-    def _resize_arrays(self, pop_size=None, keys=None):
+    def _resize_arrays(self, new_size=None, keys=None):
         ''' Resize arrays if any mismatches are found '''
-        if pop_size is None:
-            pop_size = len(self)
-        self.pop_size = pop_size
+
+        # Handle None or tuple input (representing strains and pop_size)
+        if new_size is None:
+            new_size = len(self)
+        pop_size = new_size if not isinstance(new_size, tuple) else new_size[1]
+        self.pars['pop_size'] = pop_size
+
+        # Reset sizes
         if keys is None:
             keys = self.keys()
         keys = sc.promotetolist(keys)
         for key in keys:
-            self[key].resize(pop_size, refcheck=False)
+            self[key].resize(new_size, refcheck=False) # Don't worry about cross-references to the arrays
+
         return
 
 
@@ -1027,7 +1142,15 @@ class BasePeople(FlexPretty):
         ''' Method to create person from the people '''
         p = Person()
         for key in self.meta.all_states:
-            setattr(p, key, self[key][ind])
+            data = self[key]
+            if data.ndim == 1:
+                val = data[ind]
+            elif data.ndim == 2:
+                val = data[:,ind]
+            else:
+                errormsg = f'Cannot extract data from {key}: unexpected dimensionality ({data.ndim})'
+                raise ValueError(errormsg)
+            setattr(p, key, val)
 
         contacts = {}
         for lkey, layer in self.contacts.items():
@@ -1048,7 +1171,7 @@ class BasePeople(FlexPretty):
         # Handle population size
         pop_size = len(people)
         if resize:
-            self._resize_arrays(pop_size=pop_size)
+            self._resize_arrays(new_size=pop_size)
 
         # Iterate over people -- slow!
         for p,person in enumerate(people):
@@ -1056,6 +1179,41 @@ class BasePeople(FlexPretty):
                 self[key][p] = getattr(person, key)
 
         return
+
+
+    def to_graph(self): # pragma: no cover
+        '''
+        Convert all people to a networkx MultiDiGraph, including all properties of
+        the people (nodes) and contacts (edges).
+
+        **Example**::
+
+            import covasim as cv
+            import networkx as nx
+            sim = cv.Sim(pop_size=50, pop_type='hybrid', contacts=dict(h=3, s=10, w=10, c=5)).run()
+            G = sim.people.to_graph()
+            nodes = G.nodes(data=True)
+            edges = G.edges(keys=True)
+            node_colors = [n['age'] for i,n in nodes]
+            layer_map = dict(h='#37b', s='#e11', w='#4a4', c='#a49')
+            edge_colors = [layer_map[G[i][j][k]['layer']] for i,j,k in edges]
+            edge_weights = [G[i][j][k]['beta']*5 for i,j,k in edges]
+            nx.draw(G, node_color=node_colors, edge_color=edge_colors, width=edge_weights, alpha=0.5)
+        '''
+        import networkx as nx
+
+        # Copy data from people into graph
+        G = self.contacts.to_graph()
+        for key in self.keys():
+            data = {k:v for k,v in enumerate(self[key])}
+            nx.set_node_attributes(G, data, name=key)
+
+        # Include global layer weights
+        for u,v,k in G.edges(keys=True):
+            edge = G[u][v][k]
+            edge['beta'] *= self.pars['beta_layer'][edge['layer']]
+
+        return G
 
 
     def init_contacts(self, reset=False):
@@ -1095,7 +1253,7 @@ class BasePeople(FlexPretty):
             new_contacts[lkey] = pd.DataFrame.from_dict(contacts)
         elif isinstance(contacts, list): # Assume it's a list of contacts by person, not an edgelist
             new_contacts = self.make_edgelist(contacts) # Assume contains key info
-        else:
+        else: # pragma: no cover
             errormsg = f'Cannot understand contacts of type {type(contacts)}; expecting dataframe, array, or dict'
             raise TypeError(errormsg)
 
@@ -1110,7 +1268,7 @@ class BasePeople(FlexPretty):
 
             # Create the layer if it doesn't yet exist
             if lkey not in self.contacts:
-                self.contacts[lkey] = Layer()
+                self.contacts[lkey] = Layer(label=lkey)
 
             # Actually include them, and update properties if supplied
             for col in self.contacts[lkey].keys(): # Loop over the supplied columns
@@ -1147,7 +1305,7 @@ class BasePeople(FlexPretty):
 
         # Turn into a dataframe
         for lkey in lkeys:
-            new_layer = Layer()
+            new_layer = Layer(label=lkey)
             for ckey,value in new_contacts[lkey].items():
                 new_layer[ckey] = np.array(value, dtype=new_layer.meta[ckey])
             new_contacts[lkey] = new_layer
@@ -1217,8 +1375,8 @@ class Contacts(FlexDict):
     '''
     def __init__(self, layer_keys=None):
         if layer_keys is not None:
-            for key in layer_keys:
-                self[key] = Layer()
+            for lkey in layer_keys:
+                self[lkey] = Layer(label=lkey)
         return
 
     def __repr__(self):
@@ -1237,7 +1395,7 @@ class Contacts(FlexDict):
         for key in self.keys():
             try:
                 output += len(self[key])
-            except:
+            except: # pragma: no cover
                 pass
         return output
 
@@ -1249,8 +1407,8 @@ class Contacts(FlexDict):
 
         **Example**::
 
-            hospitals_layer = cv.Layer()
-            sim.people.contacts.add_layer(hospitals=layer)
+            hospitals_layer = cv.Layer(label='hosp')
+            sim.people.contacts.add_layer(hospitals=hospitals_layer)
         '''
         for lkey,layer in kwargs.items():
             layer.validate()
@@ -1274,16 +1432,72 @@ class Contacts(FlexDict):
         return
 
 
-class Layer(FlexDict):
-    ''' A small class holding a single layer of contacts '''
+    def to_graph(self): # pragma: no cover
+        '''
+        Convert all layers to a networkx MultiDiGraph
 
-    def __init__(self, **kwargs):
+        **Example**::
+
+            import networkx as nx
+            sim = cv.Sim(pop_size=50, pop_type='hybrid').run()
+            G = sim.people.contacts.to_graph()
+            nx.draw(G)
+        '''
+        import networkx as nx
+        H = nx.MultiDiGraph()
+        for lkey,layer in self.items():
+            G = layer.to_graph()
+            H = nx.compose(H, nx.MultiDiGraph(G))
+        return H
+
+
+
+class Layer(FlexDict):
+    '''
+    A small class holding a single layer of contact edges (connections) between people.
+
+    The input is typically three arrays: person 1 of the connection, person 2 of
+    the connection, and the weight of the connection. Connections are undirected;
+    each person is both a source and sink.
+
+    This class is usually not invoked directly by the user, but instead is called
+    as part of the population creation.
+
+    Args:
+        p1 (array): an array of N connections, representing people on one side of the connection
+        p2 (array): an array of people on the other side of the connection
+        beta (array): an array of weights for each connection
+        label (str): the name of the layer (optional)
+        kwargs (dict): other keys copied directly into the layer
+
+    Note that all arguments (except for label) must be arrays of the same length,
+    although not all have to be supplied at the time of creation (they must all
+    be the same at the time of initialization, though, or else validation will fail).
+
+    **Examples**::
+
+        # Generate an average of 10 contacts for 1000 people
+        n = 10_000
+        n_people = 1000
+        p1 = np.random.randint(n_people, size=n)
+        p2 = np.random.randint(n_people, size=n)
+        beta = np.ones(n)
+        layer = cv.Layer(p1=p1, p2=p2, beta=beta, label='rand')
+
+        # Convert one layer to another with extra columns
+        index = np.arange(n)
+        self_conn = p1 == p2
+        layer2 = cv.Layer(**layer, index=index, self_conn=self_conn, label=layer.label)
+    '''
+
+    def __init__(self, label=None, **kwargs):
         self.meta = {
             'p1':    cvd.default_int,   # Person 1
             'p2':    cvd.default_int,   # Person 2
             'beta':  cvd.default_float, # Default transmissibility for this contact type
         }
         self.basekey = 'p1' # Assign a base key for calculating lengths and performing other operations
+        self.label = label
 
         # Initialize the keys of the layers
         for key,dtype in self.meta.items():
@@ -1291,7 +1505,7 @@ class Layer(FlexDict):
 
         # Set data, if provided
         for key,value in kwargs.items():
-            self[key] = np.array(value, dtype=self.meta[key])
+            self[key] = np.array(value, dtype=self.meta.get(key))
 
         return
 
@@ -1299,14 +1513,16 @@ class Layer(FlexDict):
     def __len__(self):
         try:
             return len(self[self.basekey])
-        except:
+        except: # pragma: no cover
             return 0
 
 
     def __repr__(self):
         ''' Convert to a dataframe for printing '''
+        namestr = self.__class__.__name__
+        labelstr = f'"{self.label}"' if self.label else '<no label>'
         keys_str = ', '.join(self.keys())
-        output = f'Layer({keys_str})\n'
+        output = f'{namestr}({labelstr}, {keys_str})\n' # e.g. Layer("h", p1, p2, beta)
         output += self.to_df().__repr__()
         return output
 
@@ -1391,11 +1607,32 @@ class Layer(FlexDict):
         return df
 
 
-    def from_df(self, df):
+    def from_df(self, df, keys=None):
         ''' Convert from a dataframe '''
-        for key in self.meta_keys():
+        if keys is None:
+            keys = self.meta_keys()
+        for key in keys:
             self[key] = df[key].to_numpy()
         return self
+
+
+    def to_graph(self): # pragma: no cover
+        '''
+        Convert to a networkx DiGraph
+
+        **Example**::
+
+            import networkx as nx
+            sim = cv.Sim(pop_size=20, pop_type='hybrid').run()
+            G = sim.people.contacts['h'].to_graph()
+            nx.draw(G)
+        '''
+        import networkx as nx
+        data = [np.array(self[k], dtype=dtype).tolist() for k,dtype in [('p1', int), ('p2', int), ('beta', float)]]
+        G = nx.DiGraph()
+        G.add_weighted_edges_from(zip(*data), weight='beta')
+        nx.set_edge_attributes(G, self.label, name='layer')
+        return G
 
 
     def find_contacts(self, inds, as_array=True):
@@ -1427,7 +1664,7 @@ class Layer(FlexDict):
         # Check types
         if not isinstance(inds, np.ndarray):
             inds = sc.promotetoarray(inds)
-        if inds.dtype != np.int64: # This is int64 since indices often come from cv.true(), which returns int64
+        if inds.dtype != np.int64:  # pragma: no cover # This is int64 since indices often come from cv.true(), which returns int64
             inds = np.array(inds, dtype=np.int64)
 
         # Find the contacts
@@ -1437,3 +1674,33 @@ class Layer(FlexDict):
             contact_inds.sort()  # Sorting ensures that the results are reproducible for a given seed as well as being identical to previous versions of Covasim
 
         return contact_inds
+
+
+    def update(self, people, frac=1.0):
+        '''
+        Regenerate contacts on each timestep.
+
+        This method gets called if the layer appears in ``sim.pars['dynam_lkeys']``.
+        The Layer implements the update procedure so that derived classes can customize
+        the update e.g. implementing over-dispersion/other distributions, random
+        clusters, etc.
+
+        Typically, this method also takes in the ``people`` object so that the
+        update can depend on person attributes that may change over time (e.g.
+        changing contacts for people that are severe/critical).
+
+        Args:
+            frac (float): the fraction of contacts to update on each timestep
+        '''
+        # Choose how many contacts to make
+        pop_size   = len(people) # Total number of people
+        n_contacts = len(self) # Total number of contacts
+        n_new = int(np.round(n_contacts*frac)) # Since these get looped over in both directions later
+        inds = cvu.choose(n_contacts, n_new)
+
+        # Create the contacts, not skipping self-connections
+        self['p1'][inds]   = np.array(cvu.choose_r(max_n=pop_size, n=n_new), dtype=cvd.default_int) # Choose with replacement
+        self['p2'][inds]   = np.array(cvu.choose_r(max_n=pop_size, n=n_new), dtype=cvd.default_int)
+        self['beta'][inds] = np.ones(n_new, dtype=cvd.default_float)
+        return
+
