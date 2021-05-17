@@ -5,6 +5,7 @@ These are additional interventions and helper functions that are useful for SimC
 import covasim.interventions as cvi
 import covasim.populationCampus as cvpc
 import covasim.utils as cvu
+import pandas as pd
 import numpy as np
 import sciris as sc
 
@@ -532,10 +533,10 @@ class TestScheduler(cvi.Intervention):
         sampleGenerator(numpy.array or function): Either a numpy.array listing the individuals that should be tested according to the
                                                   schedule or a function that returns such an array. If a function, there should be one 
                                                   argument, the Sim object.
-        schedule (int or []String or []int)     : If a list, the days in the simulation where a pooled test should be implemented.
+        schedule (int or []String or []int)     : If a list, the days in the simulation where a new pool of students should be made.
                                                   Dates can be specified as in-simulation dates (i.e., int) or as Strings (run 
-                                                  sciris.readdate() for acceptable formats). If an int, a pooled tests will be 
-                                                  implemented serially this number of days apart.
+                                                  sciris.readdate() for acceptable formats). If an int, a new pool will be created
+                                                  serially this number of days apart.
         start_date (int or String)              : The first day that testing should be implemented, either via an in-simulation date 
                                                   (i.e., int) or as a String (run sciris.readdate() for acceptable formats)  (0; default). 
                                                   This argument is only used if schedule is a single int; otherwise, the first test is 
@@ -550,13 +551,16 @@ class TestScheduler(cvi.Intervention):
                                                   will not have a record of their diagnosis and will not enter isolation)
         end_quarantine (Boolean)                : Whether a negative test result should end an individual's quarantine (False; default). 
                                                   This is only possible using a SimCampus object.
+        distrClock ([]int)                      : Allows the agents in a single pool to be tested on different days. The pool is split into 
+                                                  (len(distrSchedule) + 1) subpools. The first subpool is tested on the day that the new pool 
+                                                  is created. Then, the ith subpool is tested distrSchedule[i-2] days after pool creation.  
         kwargs (dict)                           : passed to Intervention()
 
     **Examples**::
     '''
 
     def __init__(self, sampleGenerator,schedule,start_date = 0,end_date = None,test_sensitivity=1.0,
-                    test_delay=0, loss_prob = 0., end_quarantine = False,**kwargs):
+                    test_delay=0, loss_prob = 0., end_quarantine = False,distrClock = [],**kwargs):
         super().__init__(**kwargs)
         self._store_args()
         self.sampleGenerator   = sampleGenerator
@@ -567,6 +571,9 @@ class TestScheduler(cvi.Intervention):
         self.test_delay        = test_delay
         self.loss_prob         = loss_prob
         self.end_quarantine    = end_quarantine
+        self.distrClock        = distrClock
+        self.distrSchedule     = pd.DataFrame({'Timers':[],'EndIndices':[]})
+        self.currentSample     = np.array([])
 
         return
 
@@ -590,6 +597,7 @@ class TestScheduler(cvi.Intervention):
             tempStorage.sort(reverse = True)
             self.schedule = tempStorage
         self.days           = self.schedule
+        self.distrClock.sort()
         self.initialized    = True
         return
 
@@ -600,20 +608,35 @@ class TestScheduler(cvi.Intervention):
 
         #Implement tests, if they are scheduled
         if check_schedule(t,self.schedule,False):
-            if callable(self.sampleGenerator):
-                currentSample = self.sampleGenerator(sim)
-            else:
-                currentSample = self.sampleGenerator
+            if len(self.currentSample) > 0:
+                raise RuntimeWarning("A new pool is being made before the last was fully implemented. The old pool will be overridden.")
 
+            if callable(self.sampleGenerator):
+                self.currentSample = self.sampleGenerator(sim)
+            else:
+                self.currentSample = self.sampleGenerator
+
+            self.distrSchedule = pd.DataFrame({'Timers': [0] + self.distrClock,'EndIndices':round(len(self.currentSample)/(len(self.distrClock) + 1))})
+            self.distrSchedule.iloc[-1,-1] = len(self.currentSample) - round(len(self.currentSample)/(len(self.distrClock) + 1)) * (self.distrSchedule.shape[0] - 1)
+            self.schedule.pop()
+
+
+        if self.distrSchedule.size > 0 and self.distrSchedule.iloc[0,0] == 0:
             #The decision to end an individual's quarantine is decided via an independent control statement so that this
             #   Intervention class will work with the original Covasim
             if self.end_quarantine:
-                sim.people.test(currentSample,self.test_sensitivity,self.loss_prob,self.test_delay,True)
+                sim.people.test(self.currentSample[:self.distrSchedule.iloc[0,1]],self.test_sensitivity,self.loss_prob,self.test_delay,True)
             else:
-                sim.people.test(currentSample,self.test_sensitivity,self.loss_prob,self.test_delay)
-            self.schedule.pop()
+                sim.people.test(self.currentSample[:self.distrSchedule.iloc[0,1]],self.test_sensitivity,self.loss_prob,self.test_delay)
 
             #This line taken from covasim.interventions.test_prob
-            sim.results['new_tests'][t] += int(len(currentSample)*sim['pop_scale']/sim.rescale_vec[t]) # If we're using dynamic scaling, we have to scale by pop_scale, not rescale_vec
+            sim.results['new_tests'][t] += int(self.distrSchedule.iloc[0,1]*sim['pop_scale']/sim.rescale_vec[t]) # If we're using dynamic scaling, we have to scale by pop_scale, not rescale_vec
+
+            #We are now done with this subpool
+            self.currentSample = self.currentSample[self.distrSchedule.iloc[0,1]:]
+            self.distrSchedule = self.distrSchedule.iloc[1:,:]
+            
+
+        self.distrSchedule['Timers'] -= 1
 
         return 
