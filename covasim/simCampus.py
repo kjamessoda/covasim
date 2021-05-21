@@ -271,6 +271,8 @@ class SimCampus(cvs.Sim):
         n_days = self['n_days']
         if end_day:
             self['end_day'] = cvm.date(end_day)
+            #As I see it, we need to add one more day b/c the simulation will include both the start_day and end_day, but sciris.daydiff does not
+            #   (cvm.daydiff is just a wrapper for sciris.daydiff)
             n_days = cvm.daydiff(self['start_day'], self['end_day'])
             if n_days <= 0:
                 errormsg = f"Number of days must be >0, but you supplied start={str(self['start_day'])} and end={str(self['end_day'])}, which gives n_days={n_days}"

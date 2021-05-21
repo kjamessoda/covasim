@@ -207,7 +207,7 @@ def check_nab(t, people, inds=None):
     t_since_boost[vac_inds] = t-people.date_vaccinated[inds[vac_inds]]
     t_since_boost[both_inds] = t-np.maximum(people.date_recovered[inds[both_inds]],people.date_vaccinated[inds[both_inds]])
 
-    # Set current NAb
+   # Set current NAb
     people.nab[inds] = people.pars['nab_kin'][t_since_boost] * people.init_nab[inds]
 
     return
@@ -275,7 +275,9 @@ def init_immunity(sim, create=False):
         sim['immunity'] = immunity
 
     # Next, precompute the NAb kinetics and store these for access during the sim
-    sim['nab_kin'] = precompute_waning(length=sim['n_days'], pars=sim['nab_decay'])
+    #KJS: This is going against my policy of not modifying base code, but it's just easier this way. Right now, sim['n_days'] is deficient a day
+    #   when start and end are provided as dates. It would be better to fix this upstream, but this requires less thought.
+    sim['nab_kin'] = precompute_waning(length=sim['n_days']+1, pars=sim['nab_decay'])
 
     return
 

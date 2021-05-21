@@ -2,11 +2,13 @@
 These are additional interventions and helper functions that are useful for SimCampus objects
 '''
 
+import covasim.immunity as cvim
 import covasim.interventions as cvi
 import covasim.populationCampus as cvpc
 import covasim.utils as cvu
 import pandas as pd
 import numpy as np
+import numpy.random as npr
 import sciris as sc
 
 import random
@@ -640,3 +642,72 @@ class TestScheduler(cvi.Intervention):
         self.distrSchedule['Timers'] -= 1
 
         return 
+
+
+class FlashVaccinate(cvi.vaccinate):
+    '''
+        The goal of this Intervention class is to emulate interventions::vaccinate, but rather than scheduling doses and letting the immunity build
+        up, it will immediately move the selected agents into the appropriate level of immunity. Since the goal of this intervention is a modification
+        of interventions::vaccinate, this class both extends it and borrows/modifies some of its code.
+    '''
+
+    def __init__(self, vaccine, days, label=None, prob=1.0, subtarget=None, exact = False, **kwargs):
+        #Note: self.days is being used in a slightly differnt context in this subclass. Here, the array is the exact days that the intervention
+        #       will effectively call apply, since there is no need to administer second doses.
+        super().__init__(vaccine, days, label, prob, subtarget, **kwargs)
+        #Whether the data member self.prob should be interpreted as a probability of vaccination (False; default for similarity to the parent 
+        #   class) or an exact proportion of unvaccinated agents (True), ignoring rounding error.
+        self.exact = exact
+
+    def initialize(self,sim):
+        super().initialize(sim)
+
+    def apply(self,sim):
+        ''' Perform vaccination '''
+        if sim.t in self.days:
+            if self.exact:
+                unvacc_inds = sc.findinds(~sim.people.vaccinated * ~sim.people.dead)
+                if self.subtarget is not None:
+                    #TODO: This block needs some modification
+                    subtarget_inds, subtarget_vals = get_subtargets(self.subtarget, sim)
+                    if len(subtarget_vals):
+                        vacc_probs[subtarget_inds] = subtarget_vals  # People being explicitly subtargeted
+                else:
+                    indToSample = round(self.prob * sim['pop_size'])
+                    vacc_inds = npr.choice(unvacc_inds,indToSample,replace = False)  # Assign equal vaccination probability to everyone
+            else:
+                vacc_probs = np.zeros(sim['pop_size'])
+                unvacc_inds = sc.findinds(~sim.people.vaccinated)
+                if self.subtarget is not None:
+                    subtarget_inds, subtarget_vals = get_subtargets(self.subtarget, sim)
+                    if len(subtarget_vals):
+                        vacc_probs[subtarget_inds] = subtarget_vals  # People being explicitly subtargeted
+                else:
+                    vacc_probs[unvacc_inds] = self.prob  # Assign equal vaccination probability to everyone
+                vacc_probs[cvu.true(sim.people.dead)] *= 0.0 # Do not vaccinate dead people
+                vacc_inds = cvu.true(cvu.binomial_arr(vacc_probs))  # Calculate who actually gets vaccinated
+
+            if len(vacc_inds):
+                self.vaccinated[sim.t] = vacc_inds
+                sim.people.flows['new_vaccinations'] += len(vacc_inds)
+                sim.people.flows['new_vaccinated']   += len(vacc_inds)
+                self.first_dose_nab_days[sim.t] = vacc_inds
+                self.vaccinations[vacc_inds] += 1
+                if self.p.interval is not None:
+                    self.second_dose_days[sim.t] = vacc_inds
+                    self.second_dose_nab_days[sim.t] = vacc_inds
+                    self.vaccinations[vacc_inds] += 1
+
+                # Update vaccine attributes in sim
+                sim.people.vaccinated[vacc_inds] = True
+                sim.people.vaccine_source[vacc_inds] = self.index
+                self.vaccination_dates[vacc_inds] = sim.t
+
+                # Update vaccine attributes in sim
+                sim.people.vaccinations[vacc_inds] = self.vaccinations[vacc_inds]
+
+            sim.people.date_vaccinated[vacc_inds] = sim.t
+            cvim.init_nab(sim.people, vacc_inds, prior_inf=False)
+
+        return
+
