@@ -574,40 +574,40 @@ class Sim(cvb.BaseSim):
 
         # Randomly infect some people (imported infections)
         if str(type(self)) == "<class 'covasim.simCampus.SimCampus'>" and self.n_importsNonRes: #There has to be a better way to do this, but I am not sure what it is...
+            #Get the number of attempted imported infections all at once
             n_imports = cvu.poisson(self['n_imports']/self.rescale_vec[self.t]) # Imported cases for residential students
-            importBreakdown = npr.multinomial(n_imports,self.importRatio,1)
-            print(importBreakdown)
+            importBreakdown_res = npr.multinomial(n_imports,self.importRatio,1)
             if self.watcher:
                 self.watcher.write("Resident Import," + str(n_imports) + '\n')
-            if importBreakdown.sum() > 0:
-                for i in range(self['n_strains']):
-                    importation_inds = cvu.choose(max_n = self.dorm_offsets[-1], n=importBreakdown[0][i])
-                    if len(importation_inds) > 0:
-                        people.infect(inds=importation_inds, hosp_max=hosp_max, icu_max=icu_max, layer='importation',strain = i)
 
             n_imports = cvu.poisson(self.n_importsNonRes/self.rescale_vec[self.t]) # Imported cases for non-residential students
-            importBreakdown = npr.multinomial(n_imports,self.importRatio,1)
+            importBreakdown_nonRes = npr.multinomial(n_imports,self.importRatio,1)
             if self.watcher:
                 self.watcher.write("Non-Resident Import," + str(n_imports) + '\n')
-            if importBreakdown.sum() > 0:
-                for i in range(self['n_strains']):
-                    importation_inds = cvu.choose(max_n = self.nonResidentEndIndex - self.dorm_offsets[-1], n=importBreakdown[0][i]) + self.dorm_offsets[-1]
-                    if len(importation_inds) > 0:
-                        people.infect(inds=importation_inds, hosp_max=hosp_max, icu_max=icu_max, layer='importation',strain = i)
-
 
             # Imported cases for graduate students. Notice that their importation rate is scaled based on the population size for graduate students,
             #   the number of contacts they have, and the lowered probability of transmission.
             if len(people) > self.nonResidentEndIndex: #Only create imported cases for grad students if there are in fact grad students
                 n_imports = cvu.poisson((self.n_importsNonRes * (self['pop_size'] - self.nonResidentEndIndex)/(self.nonResidentEndIndex - self.dorm_offsets[-1]) * self.gradContactScale * self.gradTransmissionScale)/self.rescale_vec[self.t])
-                importBreakdown = npr.multinomial(n_imports,self.importRatio,1)
+                importBreakdown_grad = npr.multinomial(n_imports,self.importRatio,1)
             else:
-                importBreakdown = np.array([0])
+                importBreakdown_grad = np.array([0])
             if self.watcher:
                 self.watcher.write("Grad Import," + str(n_imports) + '\n')
-            if importBreakdown.sum() > 0:
-                for i in range(self['n_strains']):
-                    importation_inds = cvu.choose(max_n = len(people) - self.nonResidentEndIndex, n=importBreakdown[0][i]) + self.nonResidentEndIndex
+
+            for i in range(self['n_strains']):
+                if importBreakdown_res.sum() > 0:
+                    importation_inds = cvu.choose(max_n = self.dorm_offsets[-1], n=importBreakdown_res[0][i])
+                    if len(importation_inds) > 0:
+                        people.infect(inds=importation_inds, hosp_max=hosp_max, icu_max=icu_max, layer='importation',strain = i)
+
+                if importBreakdown_nonRes.sum() > 0:
+                    importation_inds = cvu.choose(max_n = self.nonResidentEndIndex - self.dorm_offsets[-1], n=importBreakdown_nonRes[0][i]) + self.dorm_offsets[-1]
+                    if len(importation_inds) > 0:
+                        people.infect(inds=importation_inds, hosp_max=hosp_max, icu_max=icu_max, layer='importation',strain = i)
+
+                if importBreakdown_grad.sum() > 0:
+                    importation_inds = cvu.choose(max_n = len(people) - self.nonResidentEndIndex, n=importBreakdown_grad[0][i]) + self.nonResidentEndIndex
                     if len(importation_inds) > 0:
                         people.infect(inds=importation_inds, hosp_max=hosp_max, icu_max=icu_max, layer='importation',strain = i)
         elif self['n_imports']:
