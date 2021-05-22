@@ -18,6 +18,7 @@ class SimCampus(cvs.Sim):
                     dorms = None, 
                     nonResident = 0, nonResContacts = None, n_importsNonRes = None,
                     gradStudents = 0, gradContactScale = 1., gradTransmissionScale = 1.,
+                    importRatio = [1.],
                     age_dist = {'dist':'uniform', 'par1':18, 'par2':22},initialRecovered = [],debug= False, **kwargs):
         super().__init__(pars, datafile, datacols, label, simfile, popfile, load_pop, save_pop,**kwargs)
         #super().__init__(**kwargs)
@@ -95,6 +96,12 @@ class SimCampus(cvs.Sim):
         self.gradContactScale = gradContactScale 
         self.gradTransmissionScale = gradTransmissionScale
 
+        #This data member is a list where each element is the probability that an imported infection will be of a certain strain. The probabilities
+        #   should appear in the same order as the strain objects appear in self.strains. (NOTE: This member is validated in initialize.) This feature
+        #   requires that all strains are available for import on day 0. Provide the value -1 if you want to suppress this behavior, but then only the 
+        #   first strain will be used for "regular" import.
+        self.importRatio = importRatio
+
 
         if debug:
             self.watcher = open("watcher.csv",'w')
@@ -121,6 +128,18 @@ class SimCampus(cvs.Sim):
         super().initialize(reset, **kwargs)
         for instruction in self.initialRecovered:
             self.set_random_recovered(instruction['nAgents'],instruction['subpop'])
+
+        #Validate self.importRatio
+        if self['use_waning']:
+            if self.importRatio == -1 or self.importRatio[0] == -1:
+                self.importRatio    = np.full(self['n_strains'],0)
+                self.importRatio[0] = 1
+            elif len(self.importRatio) != self['n_strains']:
+                    print("The number of strains in simCampus.strains does not match that of simCampus.importRatio.\nDefaulting to equal probabilities.")
+                    self.importRatio = np.full(self['n_strains'],1./self['n_strains'])
+
+            if sum(self.importRatio) != 1:
+                raise ValueError("The values in simCampus.importRatio do not add up to one. Try again.")
 
 
     def init_people(self, save_pop=False, load_pop=False, popfile=None, verbose=None, **kwargs):
