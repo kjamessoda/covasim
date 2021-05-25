@@ -18,13 +18,14 @@ class SimCampus(cvs.Sim):
                     dorms = None, 
                     nonResident = 0, nonResContacts = None, n_importsNonRes = None,
                     gradStudents = 0, gradContactScale = 1., gradTransmissionScale = 1.,
-                    importRatio = [1.],
+                    importRatio = [1.],skipFirst = False,
                     age_dist = {'dist':'uniform', 'par1':18, 'par2':22},initialRecovered = [],debug= False, **kwargs):
         super().__init__(pars, datafile, datacols, label, simfile, popfile, load_pop, save_pop,**kwargs)
         #super().__init__(**kwargs)
         self['pop_type'] = 'campus' #This is just bookkeeping right now
         self.age_dist = age_dist #This new parameter provides a function for the age distribution of People objects
         self.debug = debug #This data member communicates whether the simulation is being used for software testing
+        self.skipFirst = skipFirst
 
         if not isinstance(initialRecovered,list):
             raise ValueError("The argument initialRecovered needs to be a list of dictionaries.")
@@ -131,6 +132,7 @@ class SimCampus(cvs.Sim):
 
         #Validate self.importRatio
         if self['use_waning']:
+            print('n_strains: ' + str(self['n_strains']))
             if self.importRatio == -1 or self.importRatio[0] == -1:
                 self.importRatio    = np.full(self['n_strains'],0)
                 self.importRatio[0] = 1

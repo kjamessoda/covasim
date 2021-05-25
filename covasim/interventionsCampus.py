@@ -362,7 +362,7 @@ class symptomQuarantine(cvi.Intervention):
     def __init__(self, symp_prob, subtarget=None, ili_prev=None,test_sensitivity=1.0,
                     test_delay=0, start_day=0, end_day=None, **kwargs):
         super().__init__(**kwargs)
-        self._store_args()
+        #self._store_args()
         self.symp_prob = symp_prob
         self.subtarget = subtarget
         self.ili_prev  = ili_prev
@@ -673,6 +673,11 @@ class FlashVaccinate(cvi.vaccinate):
                     if len(subtarget_vals):
                         vacc_probs[subtarget_inds] = subtarget_vals  # People being explicitly subtargeted
                 else:
+#                    if self.exact < 1:
+#                        indToSample = round(self.prob * sim['pop_size'])
+#                        vacc_inds = npr.choice(unvacc_inds,indToSample,replace = False)  # Assign equal vaccination probability to everyone
+#                    else:
+#                        vacc_inds = np.array(range(sim['pop_size']))
                     indToSample = round(self.prob * sim['pop_size'])
                     vacc_inds = npr.choice(unvacc_inds,indToSample,replace = False)  # Assign equal vaccination probability to everyone
             else:
@@ -708,6 +713,9 @@ class FlashVaccinate(cvi.vaccinate):
 
             sim.people.date_vaccinated[vacc_inds] = sim.t
             cvim.init_nab(sim.people, vacc_inds, prior_inf=False)
+            if self.p.interval is not None:
+                #If it's a two-dose vaccine, we need to call this function again so that the boost is implemented
+                cvim.init_nab(sim.people, vacc_inds, prior_inf=False)
 
         return
 
