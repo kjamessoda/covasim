@@ -600,8 +600,9 @@ class Sim(cvb.BaseSim):
 
                 #This code is repeated from below so that immunity can be incorporated into the imported infections
                 if self['use_waning']:
-                    has_nabs = np.setdiff1d(cvu.defined(people.init_nab), cvu.false(people.susceptible))
-                    if len(has_nabs): cvimm.check_nab(t, people, inds=has_nabs)
+                    has_nabs = cvu.defined(people.peak_nab)
+                    if len(has_nabs):
+                        cvimm.check_nab(t, people, inds=has_nabs)
 
                 for i in range(self['n_strains']):
                     # Again, this borrows from below so that we can incorporate immmunity into the imported cases

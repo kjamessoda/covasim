@@ -696,11 +696,11 @@ class FlashVaccinate(cvi.vaccinate):
                 self.vaccinated[sim.t] = vacc_inds
                 sim.people.flows['new_vaccinations'] += len(vacc_inds)
                 sim.people.flows['new_vaccinated']   += len(vacc_inds)
-                self.first_dose_nab_days[sim.t] = vacc_inds
+                #self.first_dose_nab_days[sim.t] = vacc_inds
                 self.vaccinations[vacc_inds] += 1
                 if self.p.interval is not None:
                     self.second_dose_days[sim.t] = vacc_inds
-                    self.second_dose_nab_days[sim.t] = vacc_inds
+                    #self.second_dose_nab_days[sim.t] = vacc_inds
                     self.vaccinations[vacc_inds] += 1
 
                 # Update vaccine attributes in sim
