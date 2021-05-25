@@ -289,13 +289,11 @@ def init_immunity(sim, create=False):
         sim['immunity'] = immunity
 
     # Next, precompute the NAb kinetics and store these for access during the sim
-<<<<<<< HEAD
     #KJS: This is going against my policy of not modifying base code, but it's just easier this way. Right now, sim['n_days'] is deficient a day
     #   when start and end are provided as dates. It would be better to fix this upstream, but this requires less thought.
-    sim['nab_kin'] = precompute_waning(length=sim['n_days']+1, pars=sim['nab_decay'])
-=======
+    #sim['nab_kin'] = precompute_waning(length=sim['n_days']+1, pars=sim['nab_decay'])
+
     sim['nab_kin'] = precompute_waning(length=sim.npts, pars=sim['nab_decay'])
->>>>>>> upstream/master
 
     return
 
